@@ -1,0 +1,201 @@
+# ==============================================
+# File: src/core/planner.py
+# Description: Planner Agent for FinAI using LangGraph-compatible classes
+# ==============================================
+from __future__ import annotations
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+from pydantic import BaseModel
+from dotenv import load_dotenv
+import os
+load_dotenv()
+API_KEY = os.getenv("NVIDIA_API_KEY")
+if not API_KEY:
+    raise ValueError("NVIDIA_API_KEY environment variable is missing")
+
+from src.tools.llm_client import LLMClient
+#llm_client = LLMClient(API_KEY)
+#get_chat_model = llm_client.get_chat_model()
+
+# except Exception:
+#     print("[DEBUG from planner.py]: LLM client not available, using stub")
+    # def get_chat_model(model: str = "gpt-4o-mini", **_: Any):
+    #     class _Dummy:
+    #         def invoke(self, messages: List[Dict[str, str]]):
+    #             # naive, deterministic plan for demo
+    #             return {
+    #                 "content": (
+    #                     "1) Identify intent and required agent.\n"
+    #                     "2) Gather user data (profile, transactions).\n"
+    #                     "3) Run selected agent with inputs.\n"
+    #                     "4) Verify success criteria.\n"
+    #                     "5) Produce concise answer and next-best actions."
+    #                 )
+    #             }
+    #     return _Dummy()
+
+list_of_agents = {
+    "upstox" : {"upstox_login": "Log in to upstox account using credentials.", "get_portfolio": "Retrieve the user's investment portfolio from upstox."},
+    "deep_web_research" : {"research_stocks": "Conduct deep web research on specified stocks or financial topics."},
+    "us_stock_analysis" : {"analyze_us_stocks": "Analyze US stock market data and trends."},
+    "indian_stock_analysis" : {"analyze_indian_stocks": "Analyze Indian stock market data and trends."},
+    "digital_twin_persona" : {"ask_persona": "Interact with the digital twin of a financeial expert to get personalized advice."},
+    "general_advisor" : {"advise": "Provide general financial advice based on user profile and transactions."},
+}
+
+class PlanStep(BaseModel):
+    id: int
+    description: str
+    agent: str
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    success_criteria: str = ""
+
+# Example of Plan object:
+# Plan(goal="Answer the user's query",
+#      rationale='A tight, minimal sequence for reliability and speed.',
+#      steps=[PlanStep(id=1, 
+#                      description='Identify intent and required agent.', 
+#                      agent='fin_advisor', 
+#                      inputs={}, 
+#                      success_criteria='Step completes without errors and produces required artifacts.'),
+#             PlanStep(id=2, 
+#                      description='Gather user data (profile, transactions).',
+#                      agent='fin_advisor', 
+#                      inputs={},
+#                      success_criteria='Step completes without errors and produces required artifacts.'),
+#             PlanStep(id=3, 
+#                      description='Run selected agent with inputs.', 
+#                      agent='fin_advisor', 
+#                      inputs={}, 
+#                      success_criteria='Step completes without errors and produces required artifacts.'),
+#             PlanStep(id=4, 
+#                      description='Verify success criteria.', 
+#                      agent='fin_advisor', 
+#                      inputs={}, 
+#                      success_criteria='Step completes without errors and produces required artifacts.'),
+#             PlanStep(id=5, 
+#                      description='Produce concise answer and next-best actions.', 
+#                      agent='fin_advisor', 
+#                      inputs={}, 
+#                      success_criteria='Step completes without errors and produces required artifacts.')])
+
+class Plan(BaseModel):
+    goal: str
+    rationale: str
+    steps: List[PlanStep]
+
+class PlannerAgent:
+    """LLM-backed planner that turns a user goal into an executable multi-step plan.
+
+    Outputs a Plan with structured steps that the Orchestrator can loop through.
+    """
+    def __init__(self, llm_client, system_prompt: Optional[str] = None):
+        self.llm_client = llm_client
+        self.system_prompt = system_prompt or (
+            f'''You are the FinAI Planner. Decompose a user's financial query into a minimal,
+            reliable plan. These are the list of agents available along with the tools available in them and their description : {list_of_agents}
+            Choose the *single best* agent when in doubt. Only include steps that move the goal forward.'''
+        )
+
+    def _parse_plan(self, text: str, intent: Optional[str]) -> Plan:
+        """Parse the LLM's textual plan into a structured Plan.
+        This parser is intentionally robust to simple numbered lists.
+        """
+        # lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        # steps: List[PlanStep] = []
+        # step_id = 1
+        # # very lightweight intent→agent mapping; the Router will refine later
+        # default_agent = {
+        #     "fin_advice": "fin_advisor",
+        #     "budget": "fin_advisor",
+        #     "score": "fin_score",
+        #     "loan": "credits_loans",
+        #     "investment": "investment_coach",
+        #     "insurance": "insurance_analyzer",
+        #     "retirement": "retirement_planner",
+        #     "tax": "tax_planner",
+        #     "fraud": "fraud_shield",
+        # }
+        # chosen_agent = default_agent.get((intent or "").lower(), "fin_advisor")
+
+        # for ln in lines:
+        #     # extract description after numbering like "1) ..." or "1. ..."
+        #     desc = ln
+        #     for sep in [") ", ")", ". ", "."]:
+        #         if ln[:2].isdigit() or ln[:1].isdigit():
+        #             parts = ln.split(sep, 1)
+        #             if len(parts) == 2:
+        #                 desc = parts[1].strip()
+        #                 break
+        #     steps.append(
+        #         PlanStep(
+        #             id=step_id,
+        #             description=desc,
+        #             #agent=chosen_agent if step_id >= 3 else "router",  # route early steps
+        #             agent="fin_advisor",
+        #             inputs={},
+        #             success_criteria="Step completes without errors and produces required artifacts.",
+        #         )
+        #     )
+        #     step_id += 1
+        steps: List[PlanStep] = []
+        if not steps:
+            steps = [
+                PlanStep(
+                    id=1,
+                    description="Route to most suitable agent.",
+                    agent="general_advisor",
+                    inputs={},
+                    success_criteria="Selected agent matches the intent.",
+                )
+                #,
+                # PlanStep(
+                #     id=2,
+                #     description="Load user & transaction data.",
+                #     agent="router",
+                #     inputs={},
+                #     success_criteria="Data available in state.",
+                # ),
+                # PlanStep(
+                #     id=3,
+                #     description="Run selected agent and verify output.",
+                #     agent=chosen_agent,
+                #     inputs={},
+                #     success_criteria="Agent output is coherent and grounded in data.",
+                # ),
+            ]
+        print(f"[DEBUG from planner.py]: Parsed plan with {len(steps)} steps, steps:\n{steps}")
+        #return text.strip()
+        return Plan(
+            goal="Analyze my portfolio and recent transactions to provide financial advice.",
+            rationale="A tight, minimal sequence for reliability and speed.",
+            steps=steps,
+        )
+
+    def plan(self, goal: str, intent: Optional[str] = None, context: Optional[Dict[str, Any]] = None) -> Plan:
+        msgs = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": f"Goal: {goal} \nKnown intent: {intent or 'unknown'}"},
+        ]
+
+        resp = self.llm_client.get_chat_model(msgs)
+        # Entire Response object from LLM:
+        # text = resp.get("content", "") if isinstance(resp, dict) else str(resp)
+
+        # Extract text content from response
+        if isinstance(resp, dict):
+            text = (
+                resp.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+        else:
+            text = getattr(resp.choices[0].message, "content", str(resp))
+        print(f"[DEBUG from planner.py]: LLM response:\n{text}")
+        return self._parse_plan(text, intent)
+
+if __name__ == "__main__":
+    # quick test
+    planner = PlannerAgent(model="nvidia/llama-3.3-nemotron-super-49b-v1.5")
+    plan = planner.plan(goal="Give me personal advice by analyzing my investment portfolio and recent transactions.")
+    print(plan)
