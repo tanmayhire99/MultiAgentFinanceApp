@@ -1,0 +1,3 @@
+export const UPSTOX_CONFIG = {
+  ACCESS_TOKEN: "JWT_REDACTED"
+};
