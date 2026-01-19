@@ -1,0 +1,9 @@
+name: FinanceApp
+channels:
+  - conda-forge
+  - nvidia
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+dependencies:
+  - python=3.13
+prefix: /home/tanmay/miniconda3/envs/FinanceApp
