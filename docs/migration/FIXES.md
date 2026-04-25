@@ -14,6 +14,7 @@ repo layout.
 | # | Title | Tag | Files touched |
 |---|---|---|---|
 | 1 | [`meta_help` flow — fix the "I can't access the internet" hallucination](#fix-1-meta_help-flow) | `migration/fix-1-meta-help` | 4 files |
+| 2 | [Hide developer trace + add `smalltalk` flow + conditional disclaimer](#fix-2-quieter-ux) | `migration/fix-2-quieter-ux` | 6 files |
 
 ---
 
@@ -136,3 +137,159 @@ Or via git:
 ```bash
 git checkout migration/fix-1-meta-help
 ```
+
+---
+
+## Fix 2: Quieter UX
+
+**Tag:** `migration/fix-2-quieter-ux`
+
+### Symptom
+
+Every response — including casual ones like "hi" — was wrapped in
+the same templated framing:
+
+```
+_Routing your query through the intent classifier…_
+
+🎯 Query Classification
+| Intent | educational |
+| ... |
+
+[the actual answer]
+
+⚠️ Disclaimer — This response is an educational, multi-agent
+analysis...
+```
+
+Two specific complaints:
+
+1. The classification card is developer-facing (which flow / which
+   tickers / which intent), but it's shown to every user on every
+   response. **Repetitive and noisy.**
+2. Casual messages like "hi" or "thanks" got routed to the
+   educational flow, which prefaced its response with `# 🎓 Educational
+   Answer` + an italic dev note + a SEBI disclaimer. **Disproportionate
+   for chitchat.**
+
+The user's framing of the bug was clear: _"Look at Claude — it does
+not print the same stuff again and again. If the query is generic, it
+talks generically. If it is something specific, then it calls agents
+and subagents. No predetermined format."_
+
+### Root cause
+
+Three independent design choices combined poorly for the casual-query
+case:
+
+1. `src/core/dispatcher.py` unconditionally emitted the routing intro
+   + classification card around every flow's output.
+2. The disclaimer footer was unconditional too — every flow got a
+   "consult a SEBI-registered advisor" footer regardless of whether
+   the response was advisory.
+3. There was no `smalltalk` intent. Casual messages fell into
+   `educational`, which has a CONCEPT system prompt — fine for
+   "what is beta?", weird for "hi".
+
+### Files touched
+
+| File | Change | Lines |
+|---|---|---|
+| `src/core/dispatcher.py` | **MODIFIED** | +60 (verbose_trace flag, /trace prefix detection, conditional disclaimer logic, intent set for "real finance flows") |
+| `src/core/router.py` | **MODIFIED** | +90 (`smalltalk` intent + label + LLM-prompt section + `_detect_smalltalk` fast-path + safe_fallback wiring) |
+| `src/core/flows/smalltalk.py` | **NEW** | ~180 (hybrid regex-static + LLM fallback) |
+| `src/core/flows/__init__.py` | **MODIFIED** | +6 (export the new flow) |
+| `src/core/flows/educational.py` | **MODIFIED** | -16 (drop banner header + italic dev-trace note) |
+| `docs/migration/FIXES.md` | **MODIFIED** | +this section |
+
+### What the fix does
+
+#### 1. Hide developer trace by default
+
+Two new toggles control whether the routing intro + classification
+card appear:
+
+```python
+# .env
+FINAI_VERBOSE_TRACE=1     # global default-on (for development / live demos)
+```
+
+```text
+/trace what can you do?    # one-shot enable for this single message
+```
+
+When neither is set, the dispatcher silently classifies the query
+(still logged to stdout), then jumps straight into the flow's
+output. The user sees a clean answer.
+
+#### 2. Conditional disclaimer
+
+The `⚠️ Disclaimer` footer now appears only for intents in
+`_FINANCE_FLOW_INTENTS = {portfolio_analysis, stock_research,
+deep_stock_research, topic_research}`. `educational`, `meta_help`,
+and `smalltalk` no longer get the SEBI footer — none of them
+produce advisory-shaped content.
+
+#### 3. New `smalltalk` flow with hybrid behaviour
+
+`src/core/flows/smalltalk.py` handles greetings / thanks /
+acknowledgments / goodbyes:
+
+* **Static fast-path** for the most common phrasings (regex match
+  → curated reply). E.g. `"hi"` → `"Hey 👋 — what would you like
+  to look at? I can pull a stock..."`. **Zero LLM cost.**
+* **LLM fallback** for nuanced casual messages the classifier
+  routed here but the regex didn't match. Tight system prompt,
+  `max_tokens=200`, streamed.
+
+The router has a matching `_detect_smalltalk()` fast-path so the
+classifier itself short-circuits for obvious greetings. Symmetric
+with the `_detect_meta_help` introduced in Fix 1.
+
+#### 4. Educational flow cleanup
+
+Removed:
+
+```python
+yield {"type": "header", "text": "# 🎓 Educational Answer\n\n"}
+yield {"type": "text", "text": "_This query was classified as a concept question, so no Portfolio, Stock, or Research Agent is being called..._\n\n"}
+```
+
+Both were dev-facing trace bleeding into the user response. The flow
+now streams the answer directly, the way Claude would.
+
+### Smoke tests run
+
+| Query | Expected intent | Trace shown? | Disclaimer? | Result |
+|---|---|---|---|---|
+| `hi` | smalltalk | No | No | ✓ static greeting only |
+| `thanks` | smalltalk | No | No | ✓ static thanks only |
+| `/trace hi` | smalltalk | YES (forced) | No | ✓ classification card + greeting |
+| `hey what are your capabilities?` | meta_help | No | No | ✓ curated markdown, no disclaimer |
+| `what is beta?` | educational | No | No | ✓ direct answer (no banner header) |
+| `tell me about WDC` | stock_research | No | YES | ✓ full research + disclaimer footer |
+
+Plus the existing 117-test migration suite — all pass. No regressions.
+
+### Snapshots
+
+End-of-fix file content:
+
+* `docs/migration/snapshots/fix-2-quieter-ux/src/core/dispatcher.py`
+* `docs/migration/snapshots/fix-2-quieter-ux/src/core/router.py`
+* `docs/migration/snapshots/fix-2-quieter-ux/src/core/flows/__init__.py`
+* `docs/migration/snapshots/fix-2-quieter-ux/src/core/flows/smalltalk.py`
+* `docs/migration/snapshots/fix-2-quieter-ux/src/core/flows/educational.py`
+
+### Things deliberately NOT in this fix
+
+* **Per-flow narration cleanup.** The stock_research / portfolio_analysis
+  flows have their own internal dev-style narration (multiple
+  `🔗 Orchestrator → Stock Agent` lines, `_For each ticker we will: 1...`,
+  etc.). Those are part of the demo's "show the agents working"
+  story and the user explicitly asked to leave those alone unless
+  raised separately. A future fix can revisit if needed.
+* **Random variation in static smalltalk replies.** Each category
+  has a single hand-written reply. Adding rotation is easy
+  (`random.choice` over a list) but the user feedback emphasised
+  "be consistent like Claude", and Claude's "hi" isn't randomised.
