@@ -1,0 +1,167 @@
+{
+  "_meta": {
+    "source": "FinAI demo fixtures",
+    "user_id": "demo",
+    "label": "Tanmay's Portfolio (Upstox demo)",
+    "base_currency": "USD",
+    "as_of": "2026-04-20",
+    "buy_prices_anchored_to": "approximately December 2025 levels",
+    "current_prices_anchored_to": "April 2026 live yfinance feed",
+    "fx_rate_assumed": {
+      "USD_per_INR": 0.011765,
+      "INR_per_USD": 85.0,
+      "note": "Indian holdings' prices here are already in USD (converted at the rate above). Live Indian-stock yfinance responses are converted on the fly at the same rate so the Portfolio Overview and the Market Snapshot agree."
+    },
+    "disclaimer": "Illustrative dummy portfolio for a multi-agent demo. Not a real account."
+  },
+  "demo": {
+    "user_id": "demo",
+    "portfolio_name": "Tanmay's Portfolio",
+    "base_currency": "USD",
+    "holdings": [
+      {
+        "ticker": "WDC",
+        "name": "Western Digital Corp",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Technology (Storage / HDD)",
+        "qty": 12,
+        "avg_cost_usd": 100.0,
+        "current_price_usd": 372.52,
+        "current_value_usd": 4470.24,
+        "absolute_gain_usd": 3270.24,
+        "absolute_gain_pct": 272.52
+      },
+      {
+        "ticker": "NVDA",
+        "name": "NVIDIA Corp",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Technology (Semiconductors)",
+        "qty": 10,
+        "avg_cost_usd": 140.0,
+        "current_price_usd": 201.68,
+        "current_value_usd": 2016.8,
+        "absolute_gain_usd": 616.8,
+        "absolute_gain_pct": 44.06
+      },
+      {
+        "ticker": "AAPL",
+        "name": "Apple Inc",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Technology (Consumer Electronics)",
+        "qty": 5,
+        "avg_cost_usd": 258.0,
+        "current_price_usd": 270.23,
+        "current_value_usd": 1351.15,
+        "absolute_gain_usd": 61.15,
+        "absolute_gain_pct": 4.74
+      },
+      {
+        "ticker": "MSFT",
+        "name": "Microsoft Corp",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Technology (Software & Cloud)",
+        "qty": 2,
+        "avg_cost_usd": 430.0,
+        "current_price_usd": 422.79,
+        "current_value_usd": 845.58,
+        "absolute_gain_usd": -14.42,
+        "absolute_gain_pct": -1.68
+      },
+      {
+        "ticker": "GOOGL",
+        "name": "Alphabet Inc",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Communication Services",
+        "qty": 5,
+        "avg_cost_usd": 305.0,
+        "current_price_usd": 341.68,
+        "current_value_usd": 1708.4,
+        "absolute_gain_usd": 183.4,
+        "absolute_gain_pct": 12.03
+      },
+      {
+        "ticker": "TSLA",
+        "name": "Tesla Inc",
+        "country": "US",
+        "exchange": "NASDAQ",
+        "sector": "Consumer Cyclical (Auto)",
+        "qty": 3,
+        "avg_cost_usd": 430.0,
+        "current_price_usd": 400.62,
+        "current_value_usd": 1201.86,
+        "absolute_gain_usd": -88.14,
+        "absolute_gain_pct": -6.83
+      },
+      {
+        "ticker": "TCS",
+        "name": "Tata Consultancy Services",
+        "country": "IN",
+        "exchange": "NSE",
+        "sector": "Information Technology",
+        "qty": 50,
+        "avg_cost_usd": 28.5,
+        "current_price_usd": 30.35,
+        "current_value_usd": 1517.5,
+        "absolute_gain_usd": 92.5,
+        "absolute_gain_pct": 6.49
+      },
+      {
+        "ticker": "RELIANCE",
+        "name": "Reliance Industries",
+        "country": "IN",
+        "exchange": "NSE",
+        "sector": "Energy & Conglomerate",
+        "qty": 70,
+        "avg_cost_usd": 14.8,
+        "current_price_usd": 16.04,
+        "current_value_usd": 1122.8,
+        "absolute_gain_usd": 86.8,
+        "absolute_gain_pct": 8.38
+      },
+      {
+        "ticker": "INFY",
+        "name": "Infosys",
+        "country": "IN",
+        "exchange": "NSE",
+        "sector": "Information Technology",
+        "qty": 100,
+        "avg_cost_usd": 17.0,
+        "current_price_usd": 15.42,
+        "current_value_usd": 1542.0,
+        "absolute_gain_usd": -158.0,
+        "absolute_gain_pct": -9.29
+      },
+      {
+        "ticker": "HDFCBANK",
+        "name": "HDFC Bank",
+        "country": "IN",
+        "exchange": "NSE",
+        "sector": "Financial Services",
+        "qty": 100,
+        "avg_cost_usd": 8.7,
+        "current_price_usd": 9.35,
+        "current_value_usd": 935.0,
+        "absolute_gain_usd": 65.0,
+        "absolute_gain_pct": 7.47
+      },
+      {
+        "ticker": "ITC",
+        "name": "ITC Limited",
+        "country": "IN",
+        "exchange": "NSE",
+        "sector": "Consumer Staples (FMCG)",
+        "qty": 250,
+        "avg_cost_usd": 3.4,
+        "current_price_usd": 3.59,
+        "current_value_usd": 897.5,
+        "absolute_gain_usd": 47.5,
+        "absolute_gain_pct": 5.59
+      }
+    ]
+  }
+}

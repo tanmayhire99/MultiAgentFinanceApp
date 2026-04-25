@@ -1,0 +1,310 @@
+{
+  "_meta": {
+    "source": "FinAI demo fixtures",
+    "currency": "USD",
+    "as_of": "2026-03-01",
+    "disclaimer": "Illustrative data for a multi-agent demo. Not live market data."
+  },
+  "AAPL": {
+    "name": "Apple Inc.",
+    "sector": "Technology",
+    "industry": "Consumer Electronics",
+    "quote": {
+      "price": 229.12,
+      "change_pct_1d": 0.42,
+      "volume": 54000000,
+      "market_cap_bn": 3480.0,
+      "52w_high": 246.5,
+      "52w_low": 164.1
+    },
+    "fundamentals": {
+      "pe_ttm": 34.5,
+      "forward_pe": 30.1,
+      "pb": 52.1,
+      "ps": 8.6,
+      "roe_pct": 152.0,
+      "roic_pct": 58.0,
+      "gross_margin_pct": 45.0,
+      "operating_margin_pct": 30.4,
+      "fcf_margin_pct": 27.0,
+      "debt_to_equity": 1.7,
+      "revenue_bn_ttm": 400.0,
+      "net_income_bn_ttm": 101.0
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 9.0,
+      "eps_cagr_5y_pct": 15.0,
+      "rd_intensity_pct": 7.5,
+      "addressable_market": "Global premium consumer devices + services (~$1.5T)",
+      "disruption_score": 4,
+      "narrative": "Services flywheel and Vision Pro optionality, but hardware saturation risk in core iPhone franchise."
+    },
+    "defensive": {
+      "current_ratio": 0.92,
+      "quick_ratio": 0.85,
+      "graham_number": 44.0,
+      "margin_of_safety_vs_graham_pct": -80.8,
+      "dividend_yield_pct": 0.45,
+      "interest_coverage": 28.0,
+      "cash_and_equivalents_bn": 65.0
+    },
+    "moat_signals": [
+      "App Store + iOS ecosystem lock-in",
+      "Highest brand value globally",
+      "Pricing power across 2.2B active devices",
+      "Deep services attach (Music, iCloud, Pay)"
+    ]
+  },
+  "MSFT": {
+    "name": "Microsoft Corporation",
+    "sector": "Technology",
+    "industry": "Software / Cloud",
+    "quote": {
+      "price": 462.8,
+      "change_pct_1d": 0.11,
+      "volume": 21000000,
+      "market_cap_bn": 3440.0,
+      "52w_high": 495.2,
+      "52w_low": 389.6
+    },
+    "fundamentals": {
+      "pe_ttm": 36.1,
+      "forward_pe": 31.8,
+      "pb": 11.9,
+      "ps": 13.4,
+      "roe_pct": 37.0,
+      "roic_pct": 27.0,
+      "gross_margin_pct": 69.0,
+      "operating_margin_pct": 44.0,
+      "fcf_margin_pct": 30.0,
+      "debt_to_equity": 0.35,
+      "revenue_bn_ttm": 256.0,
+      "net_income_bn_ttm": 95.0
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 15.0,
+      "eps_cagr_5y_pct": 18.0,
+      "rd_intensity_pct": 13.0,
+      "addressable_market": "Global cloud + productivity + AI infrastructure (~$2.5T)",
+      "disruption_score": 5,
+      "narrative": "Azure + OpenAI partnership + Copilot embedded across Office anchor a decade-long AI tailwind."
+    },
+    "defensive": {
+      "current_ratio": 1.75,
+      "quick_ratio": 1.66,
+      "graham_number": 78.0,
+      "margin_of_safety_vs_graham_pct": -83.2,
+      "dividend_yield_pct": 0.70,
+      "interest_coverage": 40.0,
+      "cash_and_equivalents_bn": 78.0
+    },
+    "moat_signals": [
+      "Windows + Office enterprise stickiness",
+      "Azure scale with multi-year enterprise commitments",
+      "OpenAI exclusivity and Copilot distribution advantage",
+      "High switching costs across identity + directory (Entra)"
+    ]
+  },
+  "NVDA": {
+    "name": "NVIDIA Corporation",
+    "sector": "Technology",
+    "industry": "Semiconductors",
+    "quote": {
+      "price": 148.4,
+      "change_pct_1d": 1.9,
+      "volume": 240000000,
+      "market_cap_bn": 3650.0,
+      "52w_high": 162.0,
+      "52w_low": 76.3
+    },
+    "fundamentals": {
+      "pe_ttm": 65.2,
+      "forward_pe": 38.5,
+      "pb": 38.0,
+      "ps": 27.5,
+      "roe_pct": 123.0,
+      "roic_pct": 62.0,
+      "gross_margin_pct": 75.0,
+      "operating_margin_pct": 62.0,
+      "fcf_margin_pct": 48.0,
+      "debt_to_equity": 0.17,
+      "revenue_bn_ttm": 133.0,
+      "net_income_bn_ttm": 72.0
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 59.0,
+      "eps_cagr_5y_pct": 78.0,
+      "rd_intensity_pct": 28.0,
+      "addressable_market": "AI compute + accelerated data centre (>$1T long term)",
+      "disruption_score": 5,
+      "narrative": "Platform leader in AI training/inference; CUDA network effect strengthens with each generation."
+    },
+    "defensive": {
+      "current_ratio": 4.10,
+      "quick_ratio": 3.80,
+      "graham_number": 21.5,
+      "margin_of_safety_vs_graham_pct": -85.5,
+      "dividend_yield_pct": 0.03,
+      "interest_coverage": 110.0,
+      "cash_and_equivalents_bn": 38.0
+    },
+    "moat_signals": [
+      "CUDA software ecosystem lock-in for AI workloads",
+      "Reference architectures with every hyperscaler",
+      "Generational lead in interconnect (NVLink, Spectrum-X)",
+      "Developer mindshare: most ML frameworks optimise for NVIDIA first"
+    ]
+  },
+  "TSLA": {
+    "name": "Tesla, Inc.",
+    "sector": "Consumer Cyclical",
+    "industry": "Auto Manufacturers",
+    "quote": {
+      "price": 276.5,
+      "change_pct_1d": -2.3,
+      "volume": 98000000,
+      "market_cap_bn": 880.0,
+      "52w_high": 334.0,
+      "52w_low": 138.8
+    },
+    "fundamentals": {
+      "pe_ttm": 78.0,
+      "forward_pe": 58.5,
+      "pb": 14.6,
+      "ps": 9.8,
+      "roe_pct": 21.0,
+      "roic_pct": 14.0,
+      "gross_margin_pct": 18.3,
+      "operating_margin_pct": 7.8,
+      "fcf_margin_pct": 4.1,
+      "debt_to_equity": 0.18,
+      "revenue_bn_ttm": 96.0,
+      "net_income_bn_ttm": 11.0
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 42.0,
+      "eps_cagr_5y_pct": 55.0,
+      "rd_intensity_pct": 4.5,
+      "addressable_market": "Autonomous mobility + energy storage + humanoid robotics (multi-trillion, long-dated)",
+      "disruption_score": 5,
+      "narrative": "Highest-optionality name: FSD, Optimus, Dojo, Energy storage. Near-term auto margins compressed."
+    },
+    "defensive": {
+      "current_ratio": 1.70,
+      "quick_ratio": 1.10,
+      "graham_number": 37.0,
+      "margin_of_safety_vs_graham_pct": -86.6,
+      "dividend_yield_pct": 0.0,
+      "interest_coverage": 19.0,
+      "cash_and_equivalents_bn": 30.0
+    },
+    "moat_signals": [
+      "Proprietary vision-only FSD data flywheel",
+      "Supercharger network and charging standard",
+      "Vertical integration down to cells and dies",
+      "Founder-led with long-term horizon (mixed blessing)"
+    ]
+  },
+  "GOOGL": {
+    "name": "Alphabet Inc.",
+    "sector": "Communication Services",
+    "industry": "Internet Content & Information",
+    "quote": {
+      "price": 178.9,
+      "change_pct_1d": 0.31,
+      "volume": 26000000,
+      "market_cap_bn": 2200.0,
+      "52w_high": 206.0,
+      "52w_low": 142.5
+    },
+    "fundamentals": {
+      "pe_ttm": 24.2,
+      "forward_pe": 21.5,
+      "pb": 7.1,
+      "ps": 6.4,
+      "roe_pct": 31.0,
+      "roic_pct": 23.0,
+      "gross_margin_pct": 57.0,
+      "operating_margin_pct": 30.5,
+      "fcf_margin_pct": 24.0,
+      "debt_to_equity": 0.10,
+      "revenue_bn_ttm": 344.0,
+      "net_income_bn_ttm": 91.0
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 17.0,
+      "eps_cagr_5y_pct": 19.0,
+      "rd_intensity_pct": 14.5,
+      "addressable_market": "Digital advertising + cloud + Waymo + Gemini (>$2T)",
+      "disruption_score": 4,
+      "narrative": "Search is under AI disruption risk; Gemini + DeepMind + Waymo are strong optionality; antitrust overhang."
+    },
+    "defensive": {
+      "current_ratio": 2.10,
+      "quick_ratio": 2.00,
+      "graham_number": 92.0,
+      "margin_of_safety_vs_graham_pct": -48.6,
+      "dividend_yield_pct": 0.45,
+      "interest_coverage": 150.0,
+      "cash_and_equivalents_bn": 108.0
+    },
+    "moat_signals": [
+      "Search share and query data advantage",
+      "YouTube network effect",
+      "Android + Play Store distribution",
+      "TPU silicon + Gemini model lineage",
+      "Waymo lead in autonomous miles"
+    ]
+  },
+  "WDC": {
+    "name": "Western Digital Corporation",
+    "sector": "Technology",
+    "industry": "Storage Devices (HDD)",
+    "quote": {
+      "price": 372.52,
+      "change_pct_1d": 1.85,
+      "volume": 3100000,
+      "market_cap_bn": 127.36,
+      "52w_high": 395.2,
+      "52w_low": 82.4
+    },
+    "fundamentals": {
+      "pe_ttm": 35.2,
+      "forward_pe": 26.6,
+      "pb": 6.1,
+      "ps": 5.2,
+      "roe_pct": 41.1,
+      "roic_pct": 22.0,
+      "gross_margin_pct": 39.0,
+      "operating_margin_pct": 31.9,
+      "fcf_margin_pct": 18.0,
+      "debt_to_equity": 0.65,
+      "revenue_bn_ttm": 24.5,
+      "net_income_bn_ttm": 3.2
+    },
+    "growth": {
+      "revenue_cagr_5y_pct": 9.5,
+      "eps_cagr_5y_pct": 18.0,
+      "rd_intensity_pct": 9.0,
+      "addressable_market": "AI-driven hyperscale cloud storage + enterprise HDD (~$60B)",
+      "disruption_score": 3,
+      "narrative": "Post-Sandisk-spinoff pure-play HDD leader riding the AI data-center storage supercycle. Nearline 24-32TB drives anchor >80% of revenue; durable hyperscaler demand offsets the long-term SSD substitution risk."
+    },
+    "defensive": {
+      "current_ratio": 2.10,
+      "quick_ratio": 1.40,
+      "graham_number": 62.0,
+      "margin_of_safety_vs_graham_pct": -83.4,
+      "dividend_yield_pct": 0.0,
+      "interest_coverage": 12.5,
+      "cash_and_equivalents_bn": 2.1
+    },
+    "moat_signals": [
+      "Duopoly with Seagate in enterprise HDD market",
+      "Long-term supply agreements with AWS, Google, Microsoft",
+      "Scale economics in 24-32TB high-capacity drives",
+      "Manufacturing expertise hard to replicate (IP + process)",
+      "Post-spinoff balance-sheet simplification + improved margin trajectory"
+    ]
+  }
+}

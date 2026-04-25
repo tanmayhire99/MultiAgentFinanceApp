@@ -1,0 +1,79 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Environment variables
+.env.local
+.env.*.local
+
+# LibreChat directory (separate project)
+LibreChat/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.docker/
+
+# Logs and databases
+logs/
+*.log
+*.sqlite
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Large files
+*.zip
+*.tar.gz
+*.rar
+
+# Runtime response-cache (bind-mounted into container at runtime;
+# baking stale cache into the image would serve old responses after
+# a rebuild).
+data/response_cache/
