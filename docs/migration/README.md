@@ -31,12 +31,18 @@ Every "day" of the migration gets:
 
 ## Day index
 
-| Day | Title | Tag | Files touched |
+| Day | Title | Git tag | Files touched |
 |---|---|---|---|
-| 0 | [Baseline (pre-migration)](DAY_0_BASELINE.md) | _(see snapshot folder)_ | n/a — describes existing code |
-| 1 | [`src/core/types.py`](DAY_1_TYPES.md) — Plan, PlanStep, Scratchpad, etc. | `migration/day-3` covers this | 2 new files |
-| 2 | [`src/core/agents/registry.py`](DAY_2_REGISTRY.md) — Agent catalog + policy gates | `migration/day-3` covers this | 3 new files |
-| 3 | [`src/core/agents/_base.py`](DAY_3_SCOPED_AGENT.md) — `ScopedAgent` runtime wrapper | `migration/day-3` | 2 new files + 3 modified |
+| 0 | [Baseline (pre-migration)](DAY_0_BASELINE.md) | _(precedes `migration/day-3`)_ | n/a — describes existing code |
+| 1 | [`src/core/types.py`](DAY_1_TYPES.md) — Plan, PlanStep, Scratchpad, etc. | rolled into `migration/day-3` | 2 new files |
+| 2 | [`src/core/agents/registry.py`](DAY_2_REGISTRY.md) — Agent catalog + policy gates | rolled into `migration/day-3` | 3 new files |
+| 3 | [`src/core/agents/_base.py`](DAY_3_SCOPED_AGENT.md) — `ScopedAgent` runtime wrapper | **`migration/day-3`** | 2 new files + 3 modified |
+
+> Days 1 and 2 don't have their own git tags because the source code
+> for those days was committed all at once on Day 3 (the project had
+> been uncommitted up to that point). Per-file snapshots in
+> `snapshots/day-1/` and `snapshots/day-2/` provide rollback for
+> those days. Days 4+ each get their own tag.
 
 ## How to roll back
 
