@@ -1,0 +1,314 @@
+{
+  "_meta": {
+    "source": "FinAI demo fixtures",
+    "as_of": "2026-03-01",
+    "disclaimer": "Illustrative research snippets for a multi-agent demo."
+  },
+  "NVDA": {
+    "news": [
+      {
+        "headline": "NVIDIA unveils Rubin-Ultra architecture with 2x training throughput",
+        "date": "2026-02-18",
+        "sentiment": "positive",
+        "summary": "Analysts raise long-term TAM estimates; confirms generational lead against AMD MI450 and custom silicon from hyperscalers."
+      },
+      {
+        "headline": "US export-control rules tighten for advanced AI chips to China",
+        "date": "2026-02-04",
+        "sentiment": "negative",
+        "summary": "Could remove ~8% of revenue contribution; offset by domestic and sovereign AI demand."
+      },
+      {
+        "headline": "Custom-silicon trend accelerates: Meta MTIA v3, Google TPU v6, AWS Trainium 3",
+        "date": "2026-01-22",
+        "sentiment": "mixed",
+        "summary": "Long-term concentration risk, but NVIDIA still captures the bulk of new incremental AI spend."
+      }
+    ],
+    "key_catalysts": [
+      "Rubin volume ramp through 2026 H2",
+      "Sovereign AI deals (UK, UAE, India, Japan)",
+      "CUDA developer base crossing 7M"
+    ],
+    "analyst_takes": [
+      {"house": "Morgan Stanley", "rating": "Overweight", "target_price": 185, "thesis": "Platform moat widens with each generation."},
+      {"house": "Bernstein", "rating": "Market-Perform", "target_price": 140, "thesis": "Priced for perfection; custom silicon risk emerging."}
+    ]
+  },
+  "AAPL": {
+    "news": [
+      {
+        "headline": "Apple Intelligence rolls out to all iPhone 15/16 devices, services attach rises",
+        "date": "2026-02-10",
+        "sentiment": "positive",
+        "summary": "Drives services revenue acceleration; subscriber base crosses 1.1B."
+      },
+      {
+        "headline": "Regulatory pressure on App Store fees intensifies in EU and Japan",
+        "date": "2026-01-30",
+        "sentiment": "negative",
+        "summary": "DMA-style rules may compress services margins ~150bps over 3 years."
+      },
+      {
+        "headline": "Vision Pro 2 launched at lower price point; mixed early demand",
+        "date": "2026-02-25",
+        "sentiment": "mixed",
+        "summary": "Improves consumer proposition; still a small revenue contributor."
+      }
+    ],
+    "key_catalysts": [
+      "Services growth >14% yoy",
+      "India manufacturing share crossing 25% of iPhones",
+      "AI-on-device differentiation"
+    ],
+    "analyst_takes": [
+      {"house": "Goldman Sachs", "rating": "Buy", "target_price": 255, "thesis": "Services compounder with AI tailwind."},
+      {"house": "Needham", "rating": "Hold", "target_price": 220, "thesis": "Hardware cycle saturating."}
+    ]
+  },
+  "MSFT": {
+    "news": [
+      {
+        "headline": "Azure AI revenue crosses $25B run-rate; enterprise Copilot seats grow 4x YoY",
+        "date": "2026-02-20",
+        "sentiment": "positive",
+        "summary": "AI-driven enterprise IT share gains against AWS."
+      },
+      {
+        "headline": "FTC antitrust probe into Microsoft-OpenAI arrangement widens",
+        "date": "2026-01-28",
+        "sentiment": "negative",
+        "summary": "Contained risk given structure; adds overhang."
+      }
+    ],
+    "key_catalysts": [
+      "Azure AI gross margin trajectory",
+      "Copilot Pro adoption in SMB",
+      "Activision + gaming synergies"
+    ],
+    "analyst_takes": [
+      {"house": "UBS", "rating": "Buy", "target_price": 520, "thesis": "AI-at-scale leader."},
+      {"house": "Jefferies", "rating": "Buy", "target_price": 500, "thesis": "Durable double-digit growth."}
+    ]
+  },
+  "TSLA": {
+    "news": [
+      {
+        "headline": "FSD v13.5 achieves 1,000 miles mean-time-between-interventions on highways",
+        "date": "2026-02-15",
+        "sentiment": "positive",
+        "summary": "Robotaxi pilot expansion to 4 new US cities."
+      },
+      {
+        "headline": "Model Y price cut by 8% in China to defend share vs BYD",
+        "date": "2026-02-01",
+        "sentiment": "negative",
+        "summary": "Margin compression; volumes stabilise."
+      },
+      {
+        "headline": "Optimus V3 demonstrated in internal Fremont factory tasks",
+        "date": "2026-01-18",
+        "sentiment": "mixed",
+        "summary": "Optionality long-dated; commercialisation timeline unclear."
+      }
+    ],
+    "key_catalysts": [
+      "Robotaxi commercial launch",
+      "Unsupervised FSD regulatory approvals",
+      "Energy storage gross margin expansion"
+    ],
+    "analyst_takes": [
+      {"house": "Wedbush", "rating": "Outperform", "target_price": 400, "thesis": "AI + autonomy optionality."},
+      {"house": "Barclays", "rating": "Equal-Weight", "target_price": 275, "thesis": "Near-term auto headwinds cap upside."}
+    ]
+  },
+  "GOOGL": {
+    "news": [
+      {
+        "headline": "Gemini 3 Ultra matches or beats GPT-5 on most public benchmarks",
+        "date": "2026-02-12",
+        "sentiment": "positive",
+        "summary": "Closes the perception gap; enterprise Gemini adoption accelerates."
+      },
+      {
+        "headline": "DOJ remedy proposal in Search antitrust case includes Chrome divestiture",
+        "date": "2026-01-25",
+        "sentiment": "negative",
+        "summary": "Appeal expected; structural separation a tail risk."
+      },
+      {
+        "headline": "Waymo crosses 200M fully autonomous paid miles",
+        "date": "2026-02-05",
+        "sentiment": "positive",
+        "summary": "Clear lead over all western competitors."
+      }
+    ],
+    "key_catalysts": [
+      "Gemini enterprise monetisation",
+      "Waymo unit economics at scale",
+      "Antitrust remedy outcome"
+    ],
+    "analyst_takes": [
+      {"house": "BofA", "rating": "Buy", "target_price": 210, "thesis": "AI leadership re-rates multiple."},
+      {"house": "HSBC", "rating": "Hold", "target_price": 180, "thesis": "Regulatory overhang limits re-rating."}
+    ]
+  },
+  "RELIANCE": {
+    "news": [
+      {
+        "headline": "Jio Financial Services announces UPI-linked credit card crossing 50M users",
+        "date": "2026-02-19",
+        "sentiment": "positive",
+        "summary": "Digital financial services flywheel."
+      },
+      {
+        "headline": "O2C segment margins weaken on softer refining cracks",
+        "date": "2026-02-03",
+        "sentiment": "negative",
+        "summary": "Cyclical headwind; masked by retail strength."
+      }
+    ],
+    "key_catalysts": [
+      "Jio IPO",
+      "Reliance Retail IPO",
+      "New energy capex productisation"
+    ],
+    "analyst_takes": [
+      {"house": "Kotak", "rating": "Buy", "target_price": 3200, "thesis": "Retail + Jio de-merger unlock."},
+      {"house": "CLSA", "rating": "Hold", "target_price": 2850, "thesis": "Near-term O2C weakness."}
+    ]
+  },
+  "TCS": {
+    "news": [
+      {
+        "headline": "TCS wins $2.2B multi-year AI transformation deal with European bank",
+        "date": "2026-02-22",
+        "sentiment": "positive",
+        "summary": "GenAI pricing rebound; deal pipeline strengthens."
+      },
+      {
+        "headline": "Attrition ticks up slightly; wage hikes to pressure margins near-term",
+        "date": "2026-02-06",
+        "sentiment": "mixed",
+        "summary": "Manageable given scale."
+      }
+    ],
+    "key_catalysts": [
+      "BFSI vertical recovery",
+      "AI-led deal TCV growth",
+      "Margin recovery trajectory"
+    ],
+    "analyst_takes": [
+      {"house": "Nomura", "rating": "Buy", "target_price": 4700, "thesis": "Quality compounder with AI tailwind."},
+      {"house": "Motilal", "rating": "Neutral", "target_price": 4100, "thesis": "Fair-value at current multiples."}
+    ]
+  },
+  "INFY": {
+    "news": [
+      {
+        "headline": "Infosys Topaz GenAI platform crosses 350 enterprise deployments",
+        "date": "2026-02-14",
+        "sentiment": "positive",
+        "summary": "Productised AI offering gaining traction."
+      },
+      {
+        "headline": "FY26 revenue growth guidance trimmed to 4-6%",
+        "date": "2026-01-28",
+        "sentiment": "negative",
+        "summary": "Reflects discretionary spend caution in BFSI."
+      }
+    ],
+    "key_catalysts": [
+      "FY27 guidance reset",
+      "Large-deal TCV",
+      "Margin improvement"
+    ],
+    "analyst_takes": [
+      {"house": "Jefferies", "rating": "Buy", "target_price": 2050, "thesis": "Large-deal momentum."},
+      {"house": "CITI", "rating": "Hold", "target_price": 1800, "thesis": "Demand uncertainty."}
+    ]
+  },
+  "HDFCBANK": {
+    "news": [
+      {
+        "headline": "CASA ratio stabilises at 37% after merger-related dip",
+        "date": "2026-02-21",
+        "sentiment": "positive",
+        "summary": "Deposit franchise repair on track."
+      },
+      {
+        "headline": "Q4 NIM expansion of 8bps ahead of street",
+        "date": "2026-02-08",
+        "sentiment": "positive",
+        "summary": "Best-in-class underwriting continues."
+      }
+    ],
+    "key_catalysts": [
+      "NIM recovery",
+      "LDR normalisation",
+      "Credit growth re-acceleration"
+    ],
+    "analyst_takes": [
+      {"house": "Morgan Stanley", "rating": "Overweight", "target_price": 2000, "thesis": "Best-in-class franchise at attractive valuation."},
+      {"house": "Nomura", "rating": "Neutral", "target_price": 1700, "thesis": "LDR drag near-term."}
+    ]
+  },
+  "ITC": {
+    "news": [
+      {
+        "headline": "Hotels business demerger value-accretive to minority holders",
+        "date": "2026-02-16",
+        "sentiment": "positive",
+        "summary": "Structural unlock; separate listing expected Q3."
+      },
+      {
+        "headline": "FMCG margins improve 120bps as raw material basket eases",
+        "date": "2026-02-02",
+        "sentiment": "positive",
+        "summary": "FMCG scaling to 20% of EBIT over 3 years."
+      }
+    ],
+    "key_catalysts": [
+      "Hotels demerger completion",
+      "FMCG margin trajectory",
+      "Cigarette volume growth"
+    ],
+    "analyst_takes": [
+      {"house": "IIFL", "rating": "Buy", "target_price": 540, "thesis": "Defensive compounder with unlock."},
+      {"house": "JP Morgan", "rating": "Neutral", "target_price": 470, "thesis": "Fair value at current."}
+    ]
+  },
+  "WDC": {
+    "news": [
+      {
+        "headline": "Western Digital raises FY26 guidance on AI hyperscale HDD demand",
+        "date": "2026-03-24",
+        "sentiment": "positive",
+        "summary": "Nearline 32TB drives sold out through H2; Amazon and Google extend multi-year supply agreements."
+      },
+      {
+        "headline": "SanDisk spinoff closes - WDC now pure-play HDD; margins improve ~300bps QoQ",
+        "date": "2026-02-05",
+        "sentiment": "positive",
+        "summary": "Simplified cost structure + capex focus; pure-play investor base welcomes clearer thesis."
+      },
+      {
+        "headline": "Morgan Stanley flags long-term SSD substitution risk but raises near-term target to $410",
+        "date": "2026-03-12",
+        "sentiment": "mixed",
+        "summary": "AI storage demand > flash substitution pace through 2028; beyond that the thesis weakens."
+      }
+    ],
+    "key_catalysts": [
+      "32TB nearline HDD volume ramp through 2026 H2",
+      "AWS multi-year supply agreement renewal",
+      "Operating margin expansion post-Sandisk spinoff",
+      "Potential share buyback from spinoff proceeds"
+    ],
+    "analyst_takes": [
+      {"house": "Morgan Stanley", "rating": "Overweight", "target_price": 410, "thesis": "Pure-play HDD duopoly + AI data-center supercycle."},
+      {"house": "Citi", "rating": "Buy", "target_price": 390, "thesis": "Post-spinoff margin expansion and capital discipline."},
+      {"house": "Goldman Sachs", "rating": "Neutral", "target_price": 350, "thesis": "Valuation rerating largely priced in; SSD risk long-dated."}
+    ]
+  }
+}

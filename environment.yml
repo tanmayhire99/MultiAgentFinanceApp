@@ -6,4 +6,7 @@ channels:
   - https://repo.anaconda.com/pkgs/r
 dependencies:
   - python=3.13
+  - pip
+  - pip:
+    - -r requirements.txt
 prefix: /home/tanmay/miniconda3/envs/FinanceApp

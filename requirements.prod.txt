@@ -1,0 +1,62 @@
+# Production requirements for FinAI Investor Panel
+#
+# Strict pins removed so pip can resolve a mutually-compatible set with
+# langchain-core 1.3+, mcp 1.12+, fastmcp 3+, and langchain-mcp-adapters 0.2+.
+
+# Core web stack
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+pydantic>=2.7,<3
+python-dotenv>=1
+python-multipart>=0.0.20
+
+# HTTP + OpenAI SDK (used directly only for one-off prompts today, but kept)
+httpx>=0.27,<1
+openai>=1.50
+
+# LangGraph + LangChain ecosystem for persona/worker agents.
+# We deliberately omit the top-level ``langchain`` package - it fights with
+# langchain-mcp-adapters over langchain-core versions.
+langgraph>=1.0
+langchain-core>=1.0
+langchain-openai>=1.0
+
+# MCP (Model Context Protocol) for worker agents.
+# langchain-mcp-adapters>=0.2 imports ElicitationFnT (added in mcp>=1.12);
+# fastmcp>=3.0 accepts that mcp range.
+mcp>=1.12
+fastmcp>=3.0
+langchain-mcp-adapters>=0.2.0
+
+# Live market data for the US / IN stock MCP workers. yfinance handles
+# both markets (``.NS`` / ``.BO`` suffix for Indian tickers); cachetools
+# gives us an in-process 1-hour TTL cache so we don't get rate limited
+# by Yahoo when many agents pile up on the same ticker.
+yfinance>=0.2.40
+cachetools>=5.3
+
+# Live web research for the Research MCP worker. Multi-backend strategy:
+# - tavily-python is used when TAVILY_API_KEY is set (free tier: 1k/mo)
+# - ddgs (DuckDuckGo) is the no-key fallback
+# - curated fixture is the final fallback if both live backends fail
+tavily-python>=0.3
+ddgs>=6.0
+
+# Deep Stock Research flow - see src/core/flows/deep_stock_research.py.
+# deepagents is the "agent harness" from LangChain: built-in planning
+# (write_todos), virtual filesystem, sub-agent spawning. We use it to
+# orchestrate multi-step claim-tracking research across SEC EDGAR +
+# Tavily historical news. beautifulsoup4 is needed for robust HTML->
+# text on SEC filings (fallback is a regex stripper).
+deepagents>=0.5,<1
+beautifulsoup4>=4.12
+
+# Indian NSE/BSE deep-research path (src/agents/workers/_indian_filings.py).
+# - curl-cffi impersonates a real browser's TLS fingerprint so we can hit
+#   NSE's Cloudflare-protected API from a container.
+# - pdfplumber + pypdf extract text from 200-400 page Annual Reports and
+#   25-50 page earnings-call transcripts. pdfplumber is layout-aware
+#   (preserves tables better); pypdf is a lightweight fallback.
+curl-cffi>=0.7
+pdfplumber>=0.11
+pypdf>=5

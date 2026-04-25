@@ -1,0 +1,89 @@
+Here’s a compact glossary tailored to what we’ve been discussing.
+
+***
+
+## HP‑DAG (Hierarchical Parallel DAG)
+
+- **DAG**: Directed acyclic graph; nodes are agents, edges are information flow, no cycles so you can topologically sort and execute safely.  
+- **Hierarchical**: Nodes are grouped into semantic *levels* (e.g., data gathering → analysis → debate → decision), like an org chart.  
+- **Parallel**: Within a level, agents whose inputs are ready run concurrently; barriers only exist between levels.  
+- **HP‑DAG in your context**:  
+  - Level 0: Upstox + web/data fetch agents in parallel.  
+  - Level 1: Indian + US analysis agents in parallel.  
+  - Level 2: Persona committee (bull/bear/value/growth) debating.  
+  - Level 3: Portfolio/Advisor manager synthesizing and explaining.  
+
+You’re combining MacNet’s DAG scaling idea with TradingAgents/FinCon‑style firm hierarchy.
+
+***
+
+## DMAD (Diverse Multi‑Agent Debate)
+
+- Origin: “Breaking Mental Set to Improve Reasoning through Diverse Multi‑Agent Debate” (ICLR‑25).  
+- Standard MAD: multiple similar LLM agents argue about an answer, then vote or have a judge select.  
+- **DMAD’s twist**: each agent is explicitly assigned a *different reasoning style* (e.g., chain‑of‑thought, backward reasoning, example‑driven, symbolic), and instructed to *stay diverse* and learn from others.  
+- Why it matters for you:  
+  - Your “Digital Persona” committee is a DMAD‑like module: each persona (Buffett‑like, Lynch‑like, Quant, Risk‑off) is a different reasoning style / mandate over the same portfolio.  
+  - Debate is localized (inside the persona committee), not global across the whole system.
+
+***
+
+## MAD (Multi‑Agent Debate)
+
+- Generic term for letting multiple LLM agents independently reason about a query, then debate, critique each other, and aggregate their answers.  
+- Variants differ in:  
+  - Number of agents, number of rounds.  
+  - Whether they see all others’ messages or only neighbors (sparse MAD).  
+  - How the final answer is chosen (majority, judge, weighted voting).  
+- In your system: MAD shows up only as **small debate submodules** (e.g., bull vs bear, risk‑on vs risk‑off), not as a full system‑wide all‑to‑all debate.
+
+***
+
+## Sparse MAD (Sparse Communication Topology in Debate)
+
+- Instead of each debating agent seeing *all* others’ messages (fully connected), agents are connected in a **sparse graph** (ring, star, expander).  
+- Benefits found in the EMNLP‑24 paper:  
+  - Similar or better accuracy vs fully connected.  
+  - Lower token cost and less “herding” to wrong answers.  
+- In your context: when you wire persona agents, you can intentionally restrict communication (e.g., growth only reads value + macro, not every persona), to mimic sparse MAD and save context.
+
+***
+
+## ASL (Agentic Self‑Learning)
+
+- Pattern from “Agentic Self‑Learning in Search Environments”: a **closed loop** of three LLM roles:  
+  - PG (Prompt Generator): creates synthetic tasks and candidate answers.  
+  - PM (Policy Model): tries to solve tasks.  
+  - GRM (Generative Reward Model): evaluates solutions and provides rewards.  
+- All three are (often) the same base model with different prompts; they co‑evolve with RL / fine‑tuning.  
+- For you: this is the template for a self‑learning loop that improves your personas and advisor over time using synthetic portfolios and user/market feedback.
+
+***
+
+## ALAS (Autonomous Learning Agent System)
+
+- Framework for **self‑updating LLMs** to overcome knowledge cutoff.  
+- Decomposed into agents: curriculum planner, retriever, distiller, fine‑tuning pipeline, evaluator.  
+- It autonomously crawls new info, turns it into training data, fine‑tunes the model, and re‑evaluates.  
+- For you: blueprint for keeping the Indian/US analysis agents and personas current with new regulations, market changes, Upstox API changes, etc.
+
+***
+
+## SPIN (Self‑Play Fine‑Tuning Converts Weak LMs to Strong LMs)
+
+- Self‑play fine‑tuning method: the model repeatedly trains on *its own* generated outputs plus original SFT data, learning to distinguish and improve on earlier responses.  
+- No extra human labels: synthetic self‑play data only.  
+- For you:  
+  - A concrete recipe to self‑train your Digital Persona base model on synthetic portfolio Q&A before plugging it into the MAS.
+
+***
+
+## HP‑MAS / HP‑DAG‑MAS (your coined terms)
+
+- **HP‑MAS**: Hierarchical Parallel Multi‑Agent System – your general term for MAS that combine:  
+  - Organizational hierarchy (levels of agents).  
+  - Parallel execution within levels.  
+  - Explicit graph/orchestration layer (HP‑DAG).  
+- Your system is a **HP‑MAS instantiated for retail portfolio analysis**, with explicit cross‑market agents and a self‑learning loop.
+
+If you want, next step can be to pick one of these (e.g., DMAD‑style personas) and design the exact prompt templates and message schemas for your implementation.
