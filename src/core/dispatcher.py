@@ -141,12 +141,21 @@ import re as _re
 
 _ARTIFACT_PREFIXES = ("/artifact ", "/report ", "/artifact\t", "/report\t")
 _ARTIFACT_BARE = {"/artifact", "/report"}
+# Match natural-language asks for a report / artifact / document. The
+# verb / noun split allows up to 3 adjective-ish words in between
+# ("generate **detailed** report", "make a **comprehensive financial**
+# report") so common phrasings work without being so loose that
+# unrelated text triggers it.
 _ARTIFACT_PHRASES = _re.compile(
     r"\b(?:"
-    r"generate(?:\s+a)?\s+(?:report|artifact|document)|"
-    r"make(?:\s+me)?(?:\s+a)?\s+(?:report|artifact|document)|"
-    r"create(?:\s+a)?\s+(?:report|artifact|document)|"
-    r"give\s+me(?:\s+a)?\s+(?:report|artifact|document)|"
+    # action verb + (optional article / pronoun) + (up to 3 word slots)
+    # + report / artifact / document
+    r"(?:generate|make|create|give\s+me|show\s+me|produce|write|draft|"
+    r"build|prepare)"
+    r"(?:\s+(?:a|an|the|me|us|some|that|this))?"
+    r"(?:\s+\w+){0,3}?"
+    r"\s+(?:report|artifact|document)|"
+    # explicit pane / artifact references
     r"show\s+(?:in|as)(?:\s+the)?\s+artifact|"
     r"in\s+(?:the\s+)?(?:artifact|side)\s+pane|"
     r"as\s+(?:an?\s+)?(?:artifact|report|document)"
