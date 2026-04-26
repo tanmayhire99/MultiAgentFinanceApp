@@ -37,12 +37,28 @@ Every "day" of the migration gets:
 | 1 | [`src/core/types.py`](DAY_1_TYPES.md) — Plan, PlanStep, Scratchpad, etc. | rolled into `migration/day-3` | 2 new files |
 | 2 | [`src/core/agents/registry.py`](DAY_2_REGISTRY.md) — Agent catalog + policy gates | rolled into `migration/day-3` | 3 new files |
 | 3 | [`src/core/agents/_base.py`](DAY_3_SCOPED_AGENT.md) — `ScopedAgent` runtime wrapper | **`migration/day-3`** | 2 new files + 3 modified |
+| 4 | [`src/core/agents/_factories.py`](DAY_4_SLICE_FACTORIES.md) — Per-agent ScopedAgent factories (slice subset: research / filings / claim / synthesizer) | **`migration/day-4-slice-factories`** | 2 new files + 2 modified |
 
 > Days 1 and 2 don't have their own git tags because the source code
 > for those days was committed all at once on Day 3 (the project had
 > been uncommitted up to that point). Per-file snapshots in
 > `snapshots/day-1/` and `snapshots/day-2/` provide rollback for
 > those days. Days 4+ each get their own tag.
+
+### Vertical slice work (Days 4-10)
+
+Days 4-10 of the migration are being delivered as a "vertical slice"
+that compresses ~7 days of architecture work into 5 stages, each with
+its own git tag. Each stage exercises end-to-end the parts of the
+architecture it covers.
+
+| Stage | Tag | What lands |
+|---|---|---|
+| 1 | `migration/day-4-slice-factories` | ✅ Factories for the 4 agents the claim-tracker slice needs |
+| 2 | `migration/day-6-7-slice-engine` | planner + sequential DAG executor + pipeline orchestrator |
+| 3 | `migration/day-10-claim-slice` | dispatcher wiring; `/planner did Tesla deliver on FSD?` works end-to-end |
+| 4 | `migration/day-4b-panel-factories` | Factories for the 4 panel-slice agents (us_stock / indian_stock / portfolio / panel) |
+| 5 | `migration/day-10b-panel-slice` | `/planner` panel queries route through new pipeline |
 
 ## How to roll back
 
