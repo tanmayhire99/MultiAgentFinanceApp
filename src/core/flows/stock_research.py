@@ -533,16 +533,24 @@ def _build_research_chat_summary(
     gathered: List[Dict[str, Any]],
     *,
     panel_summary: Optional[str] = None,
+    wants_artifact: bool = False,
 ) -> str:
-    """Compose the brief inline-chat line shown after the artifact closes.
+    """Compose the brief chat line shown at the very end of the flow.
 
-    Pulls the ``price`` / ``pe_ttm`` / ``roe_pct`` snapshot from each
-    ticker's gathered fundamentals so the chat user sees the headline
-    numbers at a glance. The full table + analyst synthesis lives in
-    the artifact pane on the right.
+    Two phrasings depending on which mode the flow ran in:
+
+    * **artifact mode** — the structured report lives in the side pane,
+      so we surface the headline numbers as a quick recap and point the
+      user toward the artifact (``Full report in the artifact pane →``).
+    * **inline mode** — everything was already streamed inline above
+      so a long "Full report in the artifact pane" line would be
+      misleading. Instead we emit a minimal "see above" closer
+      (just the panel stance summary if any).
     """
     if not gathered:
-        return "Stock research complete. Full report in the artifact pane →\n"
+        if wants_artifact:
+            return "Stock research complete. Full report in the artifact pane →\n"
+        return "_(No data captured for the requested ticker.)_\n"
 
     bullets: List[str] = []
     for entry in gathered:
@@ -564,11 +572,21 @@ def _build_research_chat_summary(
         line = f"**{ticker}** — {', '.join(bits) if bits else 'data captured'}"
         bullets.append(line)
 
-    head = " · ".join(bullets) if len(bullets) <= 2 else "\n- " + "\n- ".join(bullets)
-    pieces = [head, "Full report in the artifact pane →"]
+    if wants_artifact:
+        # Side-pane mode: recap headline numbers + point at the pane
+        head = " · ".join(bullets) if len(bullets) <= 2 else "\n- " + "\n- ".join(bullets)
+        pieces = [head, "Full report in the artifact pane →"]
+        if panel_summary:
+            pieces.insert(1, panel_summary)
+        return "\n\n".join(pieces) + "\n"
+
+    # Inline mode: the user has already seen the full streamed report
+    # above this line. Don't repeat the headline numbers (they're
+    # right there in the table they just scrolled past). Just append
+    # the panel stance summary when present.
     if panel_summary:
-        pieces.insert(1, panel_summary)
-    return "\n\n".join(pieces) + "\n"
+        return f"\n\n{panel_summary}\n"
+    return ""
 
 
 async def run(
@@ -614,6 +632,13 @@ async def run(
 
     label = ", ".join(tickers)
     want_panel = bool(decision.get("want_panel"))
+    # ``wants_artifact`` is set by the dispatcher when the user
+    # prefixes the query with ``/artifact`` / ``/report`` or includes
+    # phrases like "generate report" / "as artifact". When False
+    # (the default), everything streams inline in the chat (Claude-
+    # style); when True, the heavy structured content is wrapped in a
+    # ``:::artifact{}:::`` block for LibreChat's side pane.
+    wants_artifact = bool(decision.get("wants_artifact"))
 
     # 1) Inline status — kept short. The fetch loop below will emit
     #    several more status updates as data comes in.
@@ -625,11 +650,17 @@ async def run(
     else:
         yield status(f"Researching {label}")
 
-    # 2) Iterate each ticker. The flow yields TWO kinds of events:
-    #    "_status" (goes to chat) and the rest (goes to the artifact).
-    #    We open the artifact lazily on first non-status event so all
-    #    the data-gather progress lands in the chat, and the slower
-    #    rendering / streaming phase fills the artifact pane.
+    # 2) Iterate each ticker. _research_single_ticker yields:
+    #      "_status"        -> chat status line
+    #      "_ticker_ready"  -> ticker data handoff for panel context
+    #      everything else  -> rendered report content
+    #
+    # In artifact mode we open the artifact LAZILY on the first content
+    # event so all data-gather "_status" lines land in the chat first,
+    # then the rendering / streaming phase fills the side pane.
+    #
+    # In inline mode (the default) we forward content events directly
+    # to the chat - no artifact wrapper, no side pane.
     artifact_title = (
         f"Stock Research + Panel: {label}" if want_panel
         else f"Stock Research: {label}"
@@ -639,9 +670,9 @@ async def run(
     artifact_open = False
 
     def _ensure_artifact_open() -> List[PanelEvent]:
-        """Open the artifact on demand and emit the H1 header inside it."""
+        """Open the artifact on demand (artifact mode only)."""
         nonlocal artifact_open
-        if artifact_open:
+        if artifact_open or not wants_artifact:
             return []
         artifact_open = True
         return [
@@ -656,9 +687,10 @@ async def run(
         ):
             etype = ev.get("type")
             if etype == "_status":
-                # Chat-status event — emit OUTSIDE the artifact. If the
-                # artifact is already open we skip status (it'd land
-                # inside the artifact body, which we don't want).
+                # Chat status — emit OUTSIDE any open artifact. In inline
+                # mode this is just chat. In artifact mode we still emit
+                # it to chat ONLY if the artifact hasn't opened yet
+                # (otherwise it'd land inside the artifact body).
                 if not artifact_open:
                     yield status(ev.get("text", ""))
                 continue
@@ -666,16 +698,14 @@ async def run(
                 if ev.get("data"):
                     gathered.append(ev["data"])  # type: ignore[index]
                 continue
-            # Any other event is artifact-body content. Open the
-            # artifact (if we haven't yet) before forwarding.
+            # Any other event is rendered content.
+            #   - Artifact mode: lazy-open on first content, then forward
+            #   - Inline mode: forward directly to chat (no wrapper)
             for opener in _ensure_artifact_open():
                 yield opener
             yield ev
 
-    # 3) Optional panel debate. Same routing rules apply:
-    #    "_status" -> chat (only if artifact still closed),
-    #    "_panel_summary" -> bookkeeping for the closing chat line,
-    #    everything else -> artifact body.
+    # 3) Optional panel debate — same routing rules as above.
     panel_summary: Optional[str] = None
     if want_panel and gathered:
         async for ev in _run_panel_on_tickers(query, gathered, user_id=user_id):
@@ -691,13 +721,17 @@ async def run(
                 yield opener
             yield ev
 
-    # 4) Close the artifact (only if it was opened) and emit the chat
-    #    summary. If we never opened an artifact (e.g. zero tickers
-    #    succeeded), the chat summary stands alone.
+    # 4) Close the artifact (artifact mode only) and emit the chat
+    #    summary. In inline mode we just emit the summary; the user
+    #    has already seen the full streamed content above.
     if artifact_open:
         yield close_artifact()
     yield chat_text(
-        _build_research_chat_summary(gathered, panel_summary=panel_summary)
+        _build_research_chat_summary(
+            gathered,
+            panel_summary=panel_summary,
+            wants_artifact=wants_artifact,
+        )
     )
 
 

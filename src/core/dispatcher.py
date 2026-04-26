@@ -124,6 +124,68 @@ def _strip_trace_prefix(query: str) -> Tuple[str, bool]:
     return query, False
 
 
+# ---------------------------------------------------------------------------
+# Artifact-mode detection
+# ---------------------------------------------------------------------------
+# Default UX is "stream everything inline in the chat, like Claude does
+# for casual replies". The artifact pane (right side panel) is opt-in,
+# triggered by either:
+#   1. A leading slash command:  ``/artifact <query>`` or ``/report <query>``
+#   2. A natural-language ask elsewhere in the query: "generate report",
+#      "show in artifact", "as artifact", "make a report", etc.
+#
+# We deliberately keep the regex narrow — false positives would put a
+# heavy dense report into the side pane when the user just wanted an
+# inline answer, which is harder to recover from than the opposite.
+import re as _re
+
+_ARTIFACT_PREFIXES = ("/artifact ", "/report ", "/artifact\t", "/report\t")
+_ARTIFACT_BARE = {"/artifact", "/report"}
+_ARTIFACT_PHRASES = _re.compile(
+    r"\b(?:"
+    r"generate(?:\s+a)?\s+(?:report|artifact|document)|"
+    r"make(?:\s+me)?(?:\s+a)?\s+(?:report|artifact|document)|"
+    r"create(?:\s+a)?\s+(?:report|artifact|document)|"
+    r"give\s+me(?:\s+a)?\s+(?:report|artifact|document)|"
+    r"show\s+(?:in|as)(?:\s+the)?\s+artifact|"
+    r"in\s+(?:the\s+)?(?:artifact|side)\s+pane|"
+    r"as\s+(?:an?\s+)?(?:artifact|report|document)"
+    r")\b",
+    _re.IGNORECASE,
+)
+
+
+def _strip_artifact_prefix(query: str) -> Tuple[str, bool]:
+    """Detect ``wants_artifact`` and strip any slash-command prefix.
+
+    Returns ``(stripped_query, wants_artifact)``. wants_artifact is True
+    if either:
+
+    * the message has a ``/artifact `` or ``/report `` prefix
+      (case-insensitive), OR
+    * the message body matches one of :data:`_ARTIFACT_PHRASES`
+      ("generate report", "as artifact", "in the side pane", etc.)
+
+    Slash-command prefixes are stripped from the returned query so the
+    router sees the real intent (e.g. ``/report tell me about WDC``
+    classifies as stock_research with the right ticker).
+    """
+    q = query.lstrip()
+    lower = q.lower()
+
+    for prefix in _ARTIFACT_PREFIXES:
+        if lower.startswith(prefix):
+            return q[len(prefix):].lstrip(), True
+    if lower.rstrip() in _ARTIFACT_BARE:
+        return "", True
+
+    # Natural-language phrase elsewhere in the message
+    if _ARTIFACT_PHRASES.search(q):
+        return q, True
+
+    return query, False
+
+
 async def run_analysis(
     query: str,
     user_id: str = "demo",
@@ -139,11 +201,14 @@ async def run_analysis(
     :mod:`src.core.streaming`. Safe to call concurrently for different
     users thanks to the shared MCP cache + per-persona API key slots.
     """
-    # 0) Detect /trace prefix on the user message. This lets the user
-    #    flip on the routing-card view per-message even when the env
-    #    default is off (the typical end-user case).
+    # 0) Detect /trace and /artifact prefixes on the user message. The
+    #    /trace flag toggles the developer routing card on for this
+    #    one request; /artifact opts INTO the LibreChat artifact pane
+    #    for the heavy content (otherwise everything streams inline in
+    #    the chat, Claude-style).
     query, force_trace = _strip_trace_prefix(query)
     verbose_trace = force_trace or _env_verbose_trace()
+    query, wants_artifact = _strip_artifact_prefix(query)
 
     # 1) Intent classification. If verbose_trace is on, we narrate the
     #    routing step so the audience can see the agent graph at work.
@@ -180,10 +245,18 @@ async def run_analysis(
             "rationale": f"Classifier errored; defaulting to educational. ({e})",
         }
 
+    # Stash the artifact-mode flag on the decision so each flow can
+    # decide whether to emit ``:::artifact{}:::`` wrappers. This is
+    # read by stock_research / portfolio_analysis / deep_stock_research;
+    # smalltalk / meta_help / educational ignore it (they're already
+    # short and inline).
+    decision["wants_artifact"] = wants_artifact  # type: ignore[typeddict-unknown-key]
+
     log.info(
-        "route: query=%r intent=%s tickers=%s rationale=%s",
+        "route: query=%r intent=%s tickers=%s wants_artifact=%s rationale=%s",
         query[:80], decision.get("intent"),
-        decision.get("tickers"), decision.get("rationale"),
+        decision.get("tickers"), wants_artifact,
+        decision.get("rationale"),
     )
 
     if verbose_trace:
