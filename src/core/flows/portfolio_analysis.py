@@ -85,51 +85,87 @@ async def run(
     decision: Optional[RouteDecision] = None,
     user_id: str = "demo",
 ) -> AsyncIterator[PanelEvent]:
-    """Run the portfolio analysis, panel or no panel based on ``decision``."""
-    want_panel = bool((decision or {}).get("want_panel"))
-    trimmed_query = query.strip().rstrip("?.!")
+    """Run the portfolio analysis, panel or no panel based on ``decision``.
 
-    # 1) Top-level heading + a TOC that actually matches what will run
-    yield {"type": "header", "text": "# 📋 FinAI Portfolio Analysis\n\n"}
+    Fix 3 layout (matches stock_research):
+
+    * Inline mode (default) — a brief italic chat status line, then the
+      whole analysis (overview, market snapshot, optional panel debate,
+      summary / closing brief) streams directly into the chat.
+    * Artifact mode (``decision["wants_artifact"]=True``) — same status
+      line in chat, then the structured content is wrapped in a
+      ``:::artifact{}:::`` block for LibreChat's side pane, plus a
+      one-line chat summary at the end.
+
+    The H1 banner ``# 📋 FinAI Portfolio Analysis`` and the
+    "This response is organised in three parts:" tour-guide preamble
+    that previous versions emitted have been removed - they were
+    dev-style narration the user never asked for.
+    """
+    from src.core.artifacts import (
+        artifact_body,
+        chat_text,
+        close_artifact,
+        open_artifact,
+        safe_id,
+        status,
+    )
+
+    decision = decision or {}
+    want_panel = bool(decision.get("want_panel"))
+    wants_artifact = bool(decision.get("wants_artifact"))
+
+    # 1) One brief inline status line (more come from the panel.py
+    # orchestrator helpers below). No banner, no TOC paragraph.
     if want_panel:
-        toc_body = (
-            "This response is organised in four parts:\n"
-            "1. **Portfolio Overview** — holdings, sector mix, concentration flags, diversification score\n"
-            "2. **Market Snapshot** — live fundamentals + recent catalysts for every holding\n"
-            "3. **Investor Panel Debate** — Buffett, Wood, and Graham weigh in live\n"
-            "4. **Closing Brief** — balanced takeaways grounded in the data above\n\n"
-            "_Educational analysis — not personalised investment advice._\n\n"
+        yield status(
+            "Pulling your portfolio for full investor panel debate "
+            "(~60-180s)..."
         )
     else:
-        toc_body = (
-            "This response is organised in three parts:\n"
-            "1. **Portfolio Overview** — holdings, sector mix, concentration flags, diversification score\n"
-            "2. **Market Snapshot** — live fundamentals + recent catalysts for every holding\n"
-            "3. **Portfolio Analyst Summary** — a neutral, data-first briefing (single LLM call)\n\n"
-            "_You asked for a portfolio analysis but not a panel view. Ask "
-            "'**what does the panel think of my portfolio?**' next time if "
-            "you want the full Buffett / Wood / Graham debate._\n\n"
-            "_Educational analysis — not personalised investment advice._\n\n"
-        )
-    yield {
-        "type": "text",
-        "text": (
-            f"**Your question:** _{trimmed_query}_\n\n"
-            f"{toc_body}"
-            "---\n\n"
-        ),
-        "persona": "orchestrator",
-    }
+        yield status("Pulling your portfolio holdings + analytics...")
 
-    # 2) Orchestrator: portfolio fetch + analytics + market snapshot
+    # 2) Lazy artifact open: in artifact mode the wrapper opens on
+    # first content event; in inline mode it never opens and content
+    # flows straight to chat.
+    artifact_title = (
+        "Portfolio Analysis + Panel Debate"
+        if want_panel
+        else "Portfolio Analysis"
+    )
+    artifact_id = safe_id(f"portfolio-analysis-{user_id}")
+    artifact_open = False
+
+    def _ensure_artifact_open() -> List[PanelEvent]:
+        nonlocal artifact_open
+        if artifact_open or not wants_artifact:
+            return []
+        artifact_open = True
+        return [
+            open_artifact(identifier=artifact_id, title=artifact_title),
+            artifact_body(f"# {artifact_title}\n\n"),
+        ]
+
+    def _route(ev: PanelEvent) -> List[PanelEvent]:
+        """Route a single flow event - open the artifact if needed."""
+        return _ensure_artifact_open() + [ev]
+
+    # 3) Orchestrator: portfolio fetch + analytics + market snapshot.
+    # Forwards every event from panel.py except the structural
+    # _portfolio_ready handoff.
     portfolio_ctx: Optional[PortfolioContext] = None
     async for ev in _orchestrator_fetch_portfolio(user_id=user_id):
         if ev.get("type") == "_portfolio_ready":
             portfolio_ctx = ev.get("ctx")  # type: ignore[assignment]
             continue
-        yield ev
+        for piece in _route(ev):
+            yield piece
 
     if not portfolio_ctx or not portfolio_ctx.has_data():
+        # No artifact to close (the failure happened before any content
+        # was rendered). Just emit an inline error.
+        if artifact_open:
+            yield close_artifact()
         yield {
             "type": "error",
             "text": (
@@ -140,15 +176,25 @@ async def run(
         }
         return
 
-    # 3) Branch on want_panel
+    # 4) Branch on want_panel
     if want_panel:
         async for ev in _run_panel_branch(query, portfolio_ctx, user_id=user_id):
-            yield ev
+            for piece in _route(ev):
+                yield piece
     else:
         async for ev in _run_analyst_summary_branch(
             query, portfolio_ctx, user_id=user_id
         ):
-            yield ev
+            for piece in _route(ev):
+                yield piece
+
+    # 5) Close artifact + emit chat summary
+    if artifact_open:
+        yield close_artifact()
+    if wants_artifact:
+        yield chat_text(
+            f"Portfolio analysis ready. Full report in the artifact pane →\n"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,20 +206,16 @@ async def _run_analyst_summary_branch(
     *,
     user_id: str = "demo",
 ) -> AsyncIterator[PanelEvent]:
-    """Emit Section 3: single-analyst portfolio summary (no persona debate)."""
-    yield {
-        "type": "header",
-        "text": "## 🧾 3. Portfolio Analyst Summary\n\n",
-    }
+    """Emit the single-analyst portfolio summary (no persona debate).
+
+    Fix 3: section header only — the dev-style "_No panel was
+    requested, so we're running a single neutral LLM synthesis..._"
+    italic was removed. Tells the user nothing they care about.
+    """
     yield {
         "type": "text",
-        "text": (
-            "_No panel was requested, so we're running a single neutral LLM "
-            "synthesis grounded in the data above (one GPT-OSS-120B call, "
-            "no Buffett / Wood / Graham debate). Ask for a 'panel view' "
-            "next time if you want all three personas to weigh in._\n\n"
-        ),
-        "persona": "moderator",
+        "text": "\n## Analyst Summary\n\n",
+        "persona": "orchestrator",
     }
 
     snapshot_md = _format_snapshot_for_llm(ctx)
@@ -306,22 +348,17 @@ async def _run_panel_branch(
     *,
     user_id: str = "demo",
 ) -> AsyncIterator[PanelEvent]:
-    """Emit Section 3 (multi-round debate) and Section 4 (closing brief)."""
-    # 3) Moderator opening
-    yield {
-        "type": "header",
-        "text": "## 🎙 3. Investor Panel Debate (3-Round Sequential)\n\n### Moderator — Opening\n\n",
-    }
+    """Emit the multi-round debate + closing brief.
+
+    Fix 3: header simplified to ``## Investor Panel Debate``; the
+    "(3-Round Sequential)" parenthetical and "_Warming up the panel..._"
+    explanatory paragraph were dev-narration that the user already
+    sees in action via the round-by-round persona stream below.
+    """
     yield {
         "type": "text",
-        "text": (
-            "_Warming up the panel. This debate runs **sequentially** — "
-            "each analyst sees every earlier speaker's argument before "
-            "speaking, and may agree with, challenge, or refine those "
-            "points. The panel runs for up to three rounds, stopping "
-            "early if stances stabilise._\n\n"
-        ),
-        "persona": "moderator",
+        "text": "\n## Investor Panel Debate\n\n### Moderator — Opening\n\n",
+        "persona": "orchestrator",
     }
     mod_ctx_block = ctx.moderator_context_block()
 
@@ -359,15 +396,14 @@ async def _run_panel_branch(
         yield {"type": "error", "text": "Debate loop finished without a scratchpad."}
         return
 
-    # 5) Closing Brief - moderator synthesis over the FULL transcript
-    yield {"type": "header", "text": "\n## 🧾 4. Closing Brief\n\n"}
+    # 5) Closing Brief - moderator synthesis over the FULL transcript.
+    # Fix 3: dropped the "_Moderator synthesising..._" italic dev-note;
+    # users see the closing brief streaming in real time so the heads-up
+    # was redundant.
     yield {
         "type": "text",
-        "text": (
-            "_Moderator synthesising the full multi-round transcript "
-            "(not just the final verdicts)…_\n\n"
-        ),
-        "persona": "moderator",
+        "text": "\n## Closing Brief\n\n",
+        "persona": "orchestrator",
     }
     transcript = _format_scratchpad_for_moderator(scratchpad)
     # Feed the moderator the FULL persona context (holdings table, market

@@ -207,54 +207,75 @@ async def run(
     decision: Optional[RouteDecision] = None,
     user_id: str = "demo",
 ) -> AsyncIterator[PanelEvent]:
-    """Stream the Deep Stock Research agent's work back to the user."""
+    """Stream the Deep Stock Research agent's work back to the user.
+
+    Fix 3 layout: a brief italic chat status line, then the deep
+    agent's planning + tool calls + final report stream directly to
+    the chat (inline mode) or are wrapped in a ``:::artifact{}:::``
+    block for LibreChat's side pane (artifact mode, set when the
+    user used ``/report`` / ``/artifact`` or asked for a report
+    in natural language).
+
+    The previous H1 banner ``# 🔬 Deep Stock Research`` and the
+    multi-paragraph "_This is the batch-mode deep-research flow.
+    I'll autonomously plan a multi-step investigation..._" tour-guide
+    have been removed - they were dev-style narration that told the
+    user what was about to happen instead of just doing it.
+    """
+    from src.core.artifacts import (
+        artifact_body,
+        chat_text,
+        close_artifact,
+        open_artifact,
+        safe_id,
+        status,
+    )
+
     decision = decision or {}
     tickers = decision.get("tickers") or []
     tickers = [t for t in tickers if t][:3]
+    wants_artifact = bool(decision.get("wants_artifact"))
 
-    # --- header & guardrails -------------------------------------------------
-    yield {"type": "header", "text": "# 🔬 Deep Stock Research\n\n"}
-
+    # --- guardrail: no ticker → short inline help message -----------------
     if not tickers:
-        yield {
-            "type": "text",
-            "text": (
-                "The deep-research flow needs at least one ticker to work on. "
-                "Try again with a specific company, e.g.:\n\n"
-                "- `Do a deep dive on NVDA`\n"
-                "- `Claim tracking for Tesla`\n"
-                "- `Did Microsoft deliver on its Azure AI guidance?`\n\n"
-                "_No expensive calls are being made — add a ticker and re-ask._\n\n"
-            ),
-            "persona": "orchestrator",
-        }
+        yield chat_text(
+            "Deep research needs at least one ticker. Try one of:\n\n"
+            "- `Do a deep dive on NVDA`\n"
+            "- `Claim tracking for Tesla`\n"
+            "- `Did Microsoft deliver on its Azure AI guidance?`\n"
+        )
         return
 
     label = ", ".join(tickers)
     started = time.time()
-
     max_secs_budget = _max_seconds()
-    yield {
-        "type": "text",
-        "text": (
-            f"**Target ticker(s):** {label}\n"
-            f"**Your question:** _{query.strip()}_\n\n"
-            "_This is the batch-mode deep-research flow. I'll autonomously plan a "
-            "multi-step investigation, pull SEC filings + historical news, extract "
-            "forward-looking claims from past management commentary, compare each "
-            "claim against the latest evidence, and produce a verdict report on "
-            "whether the company delivered on its promises._\n\n"
-            "_Powered by the LangChain `deepagents` harness (planning tool + "
-            "virtual filesystem + sub-agent spawning) with the existing FinAI MCP "
-            "tool suite._\n\n"
-            f"_Budget: **up to {int(max_secs_budget // 60)} minutes**. Each tool "
-            f"call below is a real handoff to an MCP worker. If the agent runs "
-            f"long, it will be cut off at the budget and asked to produce a "
-            f"report from what it has._\n\n"
-            "---\n\n"
-        ),
-        "persona": "orchestrator",
-    }
+
+    # --- one chat status line; rest streams to chat or artifact ------------
+    yield status(
+        f"Deep research on {label} — claim tracking + SEC + historical news "
+        f"(ETA up to {int(max_secs_budget // 60)} min)..."
+    )
+
+    # Lazy artifact open. In artifact mode the wrapper opens on the
+    # first content event from the deep agent. In inline mode it
+    # never opens; everything flows to chat.
+    artifact_title = f"Deep Research: {label}"
+    artifact_id = safe_id(f"deep-research-{label}")
+    artifact_open = False
+
+    def _ensure_artifact_open() -> List[PanelEvent]:
+        nonlocal artifact_open
+        if artifact_open or not wants_artifact:
+            return []
+        artifact_open = True
+        return [
+            open_artifact(identifier=artifact_id, title=artifact_title),
+            artifact_body(f"# {artifact_title}\n\n"),
+        ]
+
+    def _route(ev: PanelEvent) -> List[PanelEvent]:
+        """Route an event - lazy-opens the artifact in artifact mode."""
+        return _ensure_artifact_open() + [ev]
 
     # --- build the deep agent -----------------------------------------------
     try:
@@ -355,7 +376,7 @@ async def run(
                     "Deep-research run exceeded max_seconds=%.0f; stopping stream early",
                     max_secs,
                 )
-                yield {
+                for piece in _route({
                     "type": "text",
                     "text": (
                         f"\n\n> ⏱️ _Wall-clock budget of "
@@ -363,7 +384,8 @@ async def run(
                         f"assembling a report from what's been gathered so far._\n\n"
                     ),
                     "persona": "orchestrator",
-                }
+                }):
+                    yield piece
                 break
 
             kind = event.get("event")
@@ -376,24 +398,34 @@ async def run(
                 # Strip noisy / huge arg values (e.g. a 40k-char document text)
                 # from the display - users don't need to see the full payload.
                 args_for_display = _sanitize_tool_args(args)
-                yield {
+                # Routed through _route so it lands in the right pane in
+                # artifact mode. The dispatcher filters tool_call events
+                # entirely when verbose_trace is off, so this only shows
+                # for /trace runs in either mode.
+                for piece in _route({
                     "type": "tool_call",
                     "persona": "deep_agent",
                     "persona_label": "Deep Research Agent",
                     "tool": tool_name,
                     "args": args_for_display,
-                }
+                }):
+                    yield piece
 
             elif kind == "on_tool_end":
                 tool_name = event.get("name") or "?"
                 output = (event.get("data") or {}).get("output")
                 summary = _summarize_tool_output(tool_name, output)
                 if summary:
-                    yield {
-                        "type": "text",
-                        "text": f"> ↩ _{summary}_\n\n",
+                    # Emit as a `tool_result` event (not a free-form text
+                    # event) so it's gated by the dispatcher's verbose_trace
+                    # filter, matching the tool_call above.
+                    for piece in _route({
+                        "type": "tool_result",
                         "persona": "deep_agent",
-                    }
+                        "tool": tool_name,
+                        "result_preview": summary,
+                    }):
+                        yield piece
 
             elif kind == "on_chat_model_stream":
                 # Token-level stream for the agent's chat output. We only
@@ -410,17 +442,24 @@ async def run(
                     content = getattr(chunk, "content", None) if chunk else None
                     if isinstance(content, str) and content:
                         if not final_emitted:
-                            yield {
-                                "type": "header",
-                                "text": "\n---\n\n## 📄 Final Report\n\n",
-                            }
+                            # Section break before the final report. The
+                            # old "## 📄 Final Report" banner was Fix 3'd
+                            # away because the streamed content speaks
+                            # for itself.
+                            for piece in _route({
+                                "type": "text",
+                                "text": "\n\n---\n\n",
+                                "persona": "orchestrator",
+                            }):
+                                yield piece
                             final_emitted = True
                         final_text_parts.append(content)
-                        yield {
+                        for piece in _route({
                             "type": "text",
                             "text": content,
                             "persona": "deep_agent",
-                        }
+                        }):
+                            yield piece
 
     except Exception as e:
         log.exception("Deep research agent crashed")
@@ -444,14 +483,21 @@ async def run(
         else:
             final_msg = _extract_final_assistant_text(final_state)
             if final_msg:
-                yield {"type": "header", "text": "\n---\n\n## 📄 Final Report\n\n"}
-                yield {
+                # Section break, no banner (Fix 3).
+                for piece in _route({
+                    "type": "text",
+                    "text": "\n\n---\n\n",
+                    "persona": "orchestrator",
+                }):
+                    yield piece
+                for piece in _route({
                     "type": "text",
                     "text": final_msg,
                     "persona": "deep_agent",
-                }
+                }):
+                    yield piece
 
-    # --- closing telemetry banner -------------------------------------------
+    # --- closing: log telemetry, close artifact (if open), chat summary ----
     duration = time.time() - started
     # Always log the event-kind distribution so we can debug stuck or
     # loopy agent runs by grepping ``docker logs finai-api``.
@@ -461,14 +507,23 @@ async def run(
         tool_call_count,
         event_kinds,
     )
-    yield {
-        "type": "text",
-        "text": (
-            f"\n\n---\n\n_Deep-research run complete. "
-            f"{tool_call_count} tool calls in {duration:.1f}s._\n"
-        ),
-        "persona": "orchestrator",
-    }
+
+    if artifact_open:
+        yield close_artifact()
+
+    # Final chat line. In artifact mode this is the only thing the
+    # user sees in the chat after the streamed status; in inline mode
+    # it just appends a single telemetry line below the report.
+    if wants_artifact:
+        yield chat_text(
+            f"Deep research complete: {tool_call_count} tool calls in "
+            f"{duration:.1f}s. Full report in the artifact pane →\n"
+        )
+    else:
+        yield chat_text(
+            f"\n\n_Deep research complete: {tool_call_count} tool calls "
+            f"in {duration:.1f}s._\n"
+        )
 
 
 # ---------------------------------------------------------------------------
