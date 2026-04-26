@@ -97,18 +97,35 @@ class PanelScratchpad:
         return None
 
     def has_converged(self, current_round: int) -> bool:
-        """True iff no persona changed stance between ``current_round`` and the previous one."""
+        """True iff all personas reached **consensus** on the same stance.
+
+        The earlier definition was "stances stable across rounds" — i.e.
+        every persona kept the SAME stance they held in the previous
+        round. That made the panel terminate after round 2 in almost
+        every run, because the personas (modelled on real investors)
+        rarely flip stance just from one rebuttal.
+
+        The current definition is true consensus: every persona arrives
+        at the same stance label (e.g. all three "cautious", or all
+        three "bullish"). Stances of e.g. ``bullish / cautious /
+        bearish`` no longer trigger convergence — those debates run
+        the full ``MAX_ROUNDS`` so the audience sees the personas
+        actually engage with each other.
+
+        Convergence still cannot fire on round 1: at minimum two rounds
+        are required so the audience sees the rebuttal phase before
+        the panel can short-circuit.
+        """
         if current_round < 2:
             return False
+        stances: List[str] = []
         for persona in PERSONA_ORDER:
             curr = self.stance_at_round(persona.name, current_round)
-            prev = self.stance_at_round(persona.name, current_round - 1)
-            if curr is None or prev is None:
-                # Missing data, don't declare convergence
+            if curr is None:
+                # Missing data — can't declare consensus.
                 return False
-            if curr != prev:
-                return False
-        return True
+            stances.append(curr)
+        return len(set(stances)) == 1
 
     # ------------------------------------------------------------------
     # Rendering
@@ -179,22 +196,23 @@ class PanelScratchpad:
 # Prompt composition
 # ---------------------------------------------------------------------------
 _ROUND_1_INSTRUCTIONS = (
-    "This is **Round 1: Opening Statements** of a three-round panel debate.\n"
+    "This is **Round 1: Opening Statements** of a multi-round panel debate.\n"
     "- The moderator just opened the debate. Earlier speakers may already "
     "  have spoken; if so, you may reference their points when it's natural.\n"
     "- Produce your own analysis grounded in the data. You may use MCP "
     "  tools to fetch any numbers you want to cite.\n"
     "- Aim for 200-280 words before the VERDICT block.\n"
-    "- Still end with the standard VERDICT / STANCE / CONFIDENCE trailer."
+    "- End with the standard VERDICT / STANCE / CONFIDENCE trailer."
 )
 
 _ROUND_2_INSTRUCTIONS = (
-    "This is **Round 2: Rebuttal** of a three-round panel debate.\n"
+    "This is **Round 2: Rebuttal** of a multi-round panel debate.\n"
     "- You have the full Round 1 transcript above.\n"
     "- Pick 1-2 specific claims from another panelist (name them) and "
     "  either AGREE, CHALLENGE, or REFINE them. Cite the panelist by name "
     "  (e.g. \"Buffett says X; I disagree because...\").\n"
-    "- You MAY refine or hold your own stance; both are legitimate.\n"
+    "- If a fellow panelist's argument has genuine merit, say so explicitly. "
+    "  You may refine or update your stance — partial concessions are honest.\n"
     "- Do NOT fetch more data — reason over the numbers already in the "
     "  transcript and the portfolio snapshot.\n"
     "- Aim for 120-180 words before the VERDICT block.\n"
@@ -202,11 +220,44 @@ _ROUND_2_INSTRUCTIONS = (
 )
 
 _ROUND_3_INSTRUCTIONS = (
-    "This is **Round 3: Final Position** of a three-round panel debate.\n"
-    "- You have the full Round 1 and Round 2 transcripts above.\n"
-    "- State your closing position. You may reaffirm, shift (explicitly "
-    "  name what convinced you), or flag irreconcilable disagreement.\n"
-    "- Stay short: 80-140 words before the VERDICT block.\n"
+    "This is **Round 3: Reconsideration** of a multi-round panel debate.\n"
+    "- The panel did not yet reach consensus. Take a step back and "
+    "  reconsider your position.\n"
+    "- Pick the OPPOSING panelist whose argument is strongest against your "
+    "  view. **Steel-man** their case in 2-3 sentences — articulate the "
+    "  best version of their argument as they would put it themselves, "
+    "  using their numbers and framing.\n"
+    "- Then ask yourself honestly: does that steel-manned argument change "
+    "  your evaluation? If yes, update your stance and explain what "
+    "  changed your mind. If no, explain why the steel-manned version "
+    "  is still not enough to move you.\n"
+    "- No new tool calls. Aim for 100-160 words before the VERDICT block.\n"
+    "- End with the standard VERDICT / STANCE / CONFIDENCE trailer."
+)
+
+_ROUND_4_INSTRUCTIONS = (
+    "This is **Round 4: Bridge-Building** of a multi-round panel debate.\n"
+    "- The panel still has not reached consensus. The goal of this round "
+    "  is to find common ground — not to argue harder.\n"
+    "- Identify at least one specific point of GENUINE agreement with "
+    "  each of the other two panelists. Name the panelist and the point "
+    "  (e.g. \"I agree with Wood that the AI tailwind is real; my caution "
+    "  is about the entry multiple, not the underlying business\").\n"
+    "- After acknowledging the agreement, restate where your stance still "
+    "  differs and why. Be precise about the irreducible disagreement.\n"
+    "- No new tool calls. Aim for 100-150 words before the VERDICT block.\n"
+    "- End with the standard VERDICT / STANCE / CONFIDENCE trailer."
+)
+
+_ROUND_5_INSTRUCTIONS = (
+    "This is **Round 5: Final Position** — the closing round.\n"
+    "- This is the last round. State your closing position.\n"
+    "- If the panel converged in spirit (you all see the same picture even "
+    "  if your stance labels differ slightly), say so.\n"
+    "- If you genuinely cannot bridge the disagreement, say so explicitly: "
+    "  \"We agree to disagree on X because [one-sentence summary of the "
+    "  irreducible difference]\". This is a legitimate outcome.\n"
+    "- Stay short: 80-120 words before the VERDICT block.\n"
     "- End with the standard VERDICT / STANCE / CONFIDENCE trailer."
 )
 
@@ -215,6 +266,8 @@ _ROUND_INSTRUCTIONS: Dict[int, str] = {
     1: _ROUND_1_INSTRUCTIONS,
     2: _ROUND_2_INSTRUCTIONS,
     3: _ROUND_3_INSTRUCTIONS,
+    4: _ROUND_4_INSTRUCTIONS,
+    5: _ROUND_5_INSTRUCTIONS,
 }
 
 
@@ -361,7 +414,13 @@ async def _stream_round_one_persona(
 # ---------------------------------------------------------------------------
 # Debate loop
 # ---------------------------------------------------------------------------
-MAX_ROUNDS = 3
+# Max rounds the panel will run before stopping unconditionally. The
+# loop short-circuits early via :meth:`PanelScratchpad.has_converged`
+# the moment all three personas agree on the same stance label, so
+# typical runs are 2-4 rounds. The cap is in place so a genuinely
+# divergent panel (e.g. bullish / cautious / bearish across the three
+# personas) doesn't run indefinitely.
+MAX_ROUNDS = 5
 
 
 _STANCE_ICON = {
@@ -628,27 +687,41 @@ async def run_debate_loop(
             if entry is not None:
                 scratchpad.entries.append(entry)
 
-        # Convergence check (skipped after round 1; need 2 rounds to compare)
+        # Consensus check (skipped after round 1; needs at least 2 rounds
+        # so the audience always sees the rebuttal phase before the panel
+        # can short-circuit).
         if round_num >= 2 and scratchpad.has_converged(round_num):
             converged_round = round_num
+            consensus_stance = scratchpad.stance_at_round(
+                PERSONA_ORDER[0].name, round_num
+            ) or ""
+            stance_label = consensus_stance.title() if consensus_stance else ""
             yield {
                 "type": "header",
                 "text": (
-                    f"\n### ✅ Panel Converged After Round {round_num}\n\n"
+                    f"\n### ✅ Panel Reached Consensus After Round {round_num}\n\n"
                 ),
             }
+            remaining = max_rounds - round_num
+            skipped_clause = (
+                f" rounds {round_num + 1}–{max_rounds} are skipped"
+                if remaining > 0 else ""
+            )
+            stance_clause = (
+                f" on **{stance_label}**" if stance_label else ""
+            )
             yield {
                 "type": "text",
                 "text": (
-                    "_No persona changed their stance between this round "
-                    "and the previous one — the debate has reached a "
-                    "stable state, so round 3 is skipped._\n\n"
+                    f"_All three panelists converged{stance_clause} "
+                    f"in round {round_num}{skipped_clause}. The moderator "
+                    "will synthesise the agreed view below._\n\n"
                 ),
                 "persona": "moderator",
             }
             break
 
-    # If we exhausted max_rounds without convergence, say so explicitly.
+    # If we exhausted max_rounds without consensus, say so explicitly.
     if converged_round is None:
         yield {
             "type": "header",
@@ -657,9 +730,9 @@ async def run_debate_loop(
         yield {
             "type": "text",
             "text": (
-                "_After {r} rounds the panel still has diverging stances — "
-                "the moderator will synthesise the persisting disagreement "
-                "below._\n\n"
+                "_After {r} rounds the panelists still hold different "
+                "stances. This is itself a useful signal — the moderator "
+                "will synthesise the irreducible disagreement below._\n\n"
             ).format(r=max_rounds),
             "persona": "moderator",
         }
@@ -688,7 +761,9 @@ def _round_heading(round_num: int) -> str:
     titles = {
         1: "\n### 🟦 Round 1 — Opening Statements\n\n",
         2: "\n### 🟨 Round 2 — Rebuttal\n\n",
-        3: "\n### 🟥 Round 3 — Final Position\n\n",
+        3: "\n### 🟧 Round 3 — Reconsideration (steel-man)\n\n",
+        4: "\n### 🟪 Round 4 — Bridge-Building\n\n",
+        5: "\n### 🟥 Round 5 — Final Position\n\n",
     }
     return titles.get(round_num, f"\n### Round {round_num}\n\n")
 
@@ -707,10 +782,22 @@ def _round_preamble(round_num: int) -> str:
             "panelist. No new tool calls — this round is pure debate._\n\n"
         ),
         3: (
-            "_The panel did not converge after Round 2 — at least one "
-            "analyst shifted stance. Each panelist now states their "
-            "closing position. They may reaffirm, move, or explicitly "
-            "flag irreconcilable disagreement._\n\n"
+            "_The panel did not yet reach consensus. Each analyst now "
+            "**steel-mans** the strongest argument against their own view "
+            "— articulating it as the opposing panelist would, then "
+            "deciding honestly whether it changes their evaluation._\n\n"
+        ),
+        4: (
+            "_Still no consensus. The panel pivots from arguing to "
+            "**bridge-building** — each analyst names at least one point "
+            "of genuine agreement with each of the other two panelists "
+            "before restating where they still differ._\n\n"
+        ),
+        5: (
+            "_This is the closing round. Each panelist states their "
+            "final position; if the panel still cannot bridge the "
+            "disagreement, they explicitly flag the irreducible "
+            "difference for the moderator's synthesis._\n\n"
         ),
     }
     return preambles.get(round_num, "")

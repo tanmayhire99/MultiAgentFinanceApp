@@ -151,31 +151,62 @@ Total time: ~90-150s.
 **Query:** `run a panel debate on my portfolio`
 
 **What to expect:** Same structural skeleton as Flow 6, but the
-synthesis section becomes a 3-persona debate:
-- **Round 1** — Buffett (long-term moat / quality), Wood
-  (innovation / TAM / disruption), Graham (margin of safety /
-  defensive metrics) each open with their initial stance
-- **Round 2** — each persona responds to the others' opening
-- **Round 3** — convergence; each persona names what they'd
-  change about their stance given the others' arguments
-- **Final Verdict** — moderator synthesis with a
-  `🟢 / 🟡 / 🔴` stance summary
+synthesis section becomes a 5-round, 3-persona debate that
+short-circuits the moment all three personas reach the same
+stance label (true consensus). Typical runs land in Round 3 or
+Round 4; genuinely divergent panels (e.g. bullish/cautious/bearish
+across the three personas) run all 5 rounds and end in an
+explicit "agree to disagree".
 
-Total time: ~3-5 minutes.
+The five rounds each have a distinct character — the personas
+don't just repeat themselves:
+- **Round 1 — Opening** — Buffett (long-term moat / quality),
+  Wood (innovation / TAM / disruption), Graham (margin of safety /
+  defensive metrics) each open with their independent read
+- **Round 2 — Rebuttal** — each persona must cite a specific
+  claim from another panelist and either AGREE, CHALLENGE, or
+  REFINE it
+- **Round 3 — Reconsideration (steel-man)** — only runs if no
+  consensus yet; each persona articulates the strongest argument
+  *against* their own view, then decides honestly whether it
+  changes their evaluation
+- **Round 4 — Bridge-Building** — only runs if still no
+  consensus; each persona names at least one point of genuine
+  agreement with each of the other two panelists before
+  restating where they still differ
+- **Round 5 — Final Position** — closing round; explicitly
+  flags any irreducible "agree to disagree"
+- **Final Verdict** — moderator synthesis + chat-pane stance
+  summary line
+
+Total time: ~3-6 minutes depending on how many rounds run.
 
 **Talking points:**
 > "The panel is what differentiates FinAI from a glorified
 > chatbot. Each persona has its own system prompt, model
 > parameters, and tool subset. Round 1 is parallelised — all
-> three personas stream simultaneously. The convergence in
-> Round 3 means the personas actually update their stances
-> based on the others' arguments, not just stack up monologues."
+> three personas stream simultaneously."
 
-> "Look at the stance summary line in the chat: even though the
-> heavy markdown is in the side panel (or inline if you didn't
-> use /artifact), the chat surfaces a one-liner like '🟡 Buffett
-> cautious · 🟢 Wood bullish · 🟡 Graham cautious — converged
-> Round 3' so the user gets the verdict at a glance."
+> "Watch how the rounds escalate. Round 2 is rebuttal — they're
+> challenging each other. Round 3 is *steel-manning* — each
+> persona literally articulates the strongest opposing argument
+> as that opponent would put it, then decides honestly if it
+> changes their mind. That's a quality of debate you almost
+> never see in stock-research output."
+
+> "Round 4 is bridge-building — the personas pivot from arguing
+> to finding common ground. They name specific points of
+> agreement with each other before flagging where they still
+> differ. The panel typically converges here, on consensus
+> that's been *earned* through the prior rounds — not because
+> they all happened to start with the same view."
+
+> "Notice the stance summary line in the chat. Whether the
+> debate ends in consensus (`🟢 Buffett bullish · 🟢 Wood bullish ·
+> 🟢 Graham bullish — converged Round 3`) or in standing
+> divergence (`🟢 Wood bullish · 🟡 Buffett cautious · 🔴 Graham
+> bearish — divergent after 5 rounds`), the user gets the
+> verdict at a glance."
 
 **If time permits:**
 - Try `/artifact run a panel debate on my portfolio` — same
