@@ -332,26 +332,24 @@ async def _research_single_ticker(
 ) -> AsyncIterator[PanelEvent]:
     """Run the focused research pipeline for one ticker.
 
-    Yields the visible handoffs and rendered sections, and (as its last
-    yield) a special ``{"type": "_ticker_ready", "data": {...}}`` event
-    that the caller consumes to build a synthetic panel context.
+    Yields ONLY the rendered report sections plus a final
+    ``{"type": "_ticker_ready", "data": {...}}`` event the caller
+    consumes to build a synthetic panel context.
+
+    Fix 3 design: this function stays silent on the wire about the
+    individual MCP tool calls (no ``tool_call`` / ``tool_result``
+    events, no "_Probing where X is listed_" narration). The caller
+    (``run``) emits a brief italic chat status line BEFORE the
+    artifact opens; everything this function yields lands inside
+    the artifact body.
 
     ``user_id`` and ``query`` are carried through only so the single
     Analyst Synthesis LLM call at the end can be cached / replayed on
     NIM connection failure (see :mod:`src.core.resilient_stream`).
     """
     ticker = ticker.upper().strip()
-    yield {"type": "header", "text": f"\n## 🏢 {ticker}\n\n"}
 
-    # 1) Market resolution (may do 1-2 probe calls)
-    yield {
-        "type": "text",
-        "text": (
-            f"_Probing where **{ticker}** is listed — US agent first, "
-            f"Indian agent as fallback..._\n\n"
-        ),
-        "persona": "orchestrator",
-    }
+    # 1) Market resolution (silently — no chat narration)
     try:
         market, quote = await _resolve_market(ticker)
     except Exception as e:
@@ -363,55 +361,18 @@ async def _research_single_ticker(
         return
 
     agent_ns = "us_stock" if market == "us" else "indian_stock"
-    agent_label = "US Stock Agent" if market == "us" else "Indian Stock Agent"
 
-    yield {
-        "type": "text",
-        "text": (
-            f"_Resolved: **{ticker}** is listed on "
-            f"{'US exchanges' if market == 'us' else 'Indian exchanges (NSE/BSE)'}. "
-            f"Routing to the **{agent_label}**._\n\n"
-        ),
-        "persona": "orchestrator",
-    }
-
-    # 2) Fundamentals
-    yield {
-        "type": "tool_call",
-        "persona": "orchestrator",
-        "persona_label": "Orchestrator",
-        "tool": f"{agent_ns}__get_fundamentals",
-        "args": {"ticker": ticker},
-    }
+    # 2) Fundamentals (silently)
     try:
         fund = await _call_tool(f"{agent_ns}__get_fundamentals", {"ticker": ticker})
     except Exception as e:
         log.exception("Fundamentals failed for %s", ticker)
         yield {"type": "error", "text": f"Fundamentals for {ticker} failed: {e}"}
         fund = {}
-
     if not isinstance(fund, dict):
         fund = {}
-    fund_preview = (
-        f"price {fund.get('price') or '-'} · "
-        f"P/E {fund.get('pe_ttm') or fund.get('forward_pe') or '-'} · "
-        f"{fund.get('_source', 'n/a')}"
-    )
-    yield {
-        "type": "tool_result",
-        "persona": "orchestrator",
-        "tool": f"{agent_ns}__get_fundamentals",
-        "result_preview": fund_preview,
-    }
 
-    # 3) Company brief
-    yield {
-        "type": "tool_call",
-        "persona": "orchestrator",
-        "persona_label": "Orchestrator",
-        "tool": "research__get_company_brief",
-        "args": {"ticker": ticker},
-    }
+    # 3) Company brief (silently)
     try:
         brief_resp = await _call_tool("research__get_company_brief", {"ticker": ticker})
     except Exception as e:
@@ -419,27 +380,9 @@ async def _research_single_ticker(
         brief_resp = {"summary": "", "sources": []}
     if not isinstance(brief_resp, dict):
         brief_resp = {"summary": "", "sources": []}
-    brief_src = brief_resp.get("_source") or "n/a"
     sources = brief_resp.get("sources") or []
-    brief_preview = (
-        f"summary via {brief_src} · {len(sources)} source"
-        f"{'s' if len(sources) != 1 else ''}"
-    )
-    yield {
-        "type": "tool_result",
-        "persona": "orchestrator",
-        "tool": "research__get_company_brief",
-        "result_preview": brief_preview,
-    }
 
-    # 4) Recent news
-    yield {
-        "type": "tool_call",
-        "persona": "orchestrator",
-        "persona_label": "Orchestrator",
-        "tool": "research__search_news",
-        "args": {"ticker": ticker, "max_items": 5},
-    }
+    # 4) Recent news (silently)
     try:
         news_resp = await _call_tool(
             "research__search_news", {"ticker": ticker, "max_items": 5}
@@ -450,19 +393,10 @@ async def _research_single_ticker(
     if not isinstance(news_resp, dict):
         news_resp = {}
     news_items = news_resp.get("news") or []
-    yield {
-        "type": "tool_result",
-        "persona": "orchestrator",
-        "tool": "research__search_news",
-        "result_preview": (
-            f"{len(news_items)} item{'s' if len(news_items) != 1 else ''} "
-            f"via {news_resp.get('backend') or news_resp.get('_source') or 'n/a'}"
-        ),
-    }
 
-    # 5) Render the structured report
+    # 5) Render the structured report (this is the artifact-body content)
     company_name = fund.get("name") or brief_resp.get("ticker") or ticker
-    sections: List[str] = [f"\n### {ticker} — {company_name}\n"]
+    sections: List[str] = [f"\n## {ticker} — {company_name}\n"]
 
     # Company overview
     summary = (brief_resp.get("summary") or "").strip()
@@ -503,12 +437,13 @@ async def _research_single_ticker(
         "persona": "orchestrator",
     }
 
-    # 6) Analyst synthesis (single LLM call, no panel)
-    yield {"type": "header", "text": "\n#### Analyst Synthesis\n\n"}
+    # 6) Analyst synthesis (single LLM call, no panel). The header is
+    # emitted as plain artifact-body text rather than a "header" event
+    # so it lands cleanly inside the side-pane markdown.
     yield {
         "type": "text",
-        "text": "_One grounded LLM call; no multi-persona debate for this flow._\n\n",
-        "persona": "moderator",
+        "text": "\n### Analyst Synthesis\n\n",
+        "persona": "orchestrator",
     }
     analyst_input = _format_analyst_input(ticker, market, fund, brief_resp, news_items)
     analyst_messages = [
@@ -564,6 +499,48 @@ async def _research_single_ticker(
 # ---------------------------------------------------------------------------
 # Flow entry point
 # ---------------------------------------------------------------------------
+def _build_research_chat_summary(
+    gathered: List[Dict[str, Any]],
+    *,
+    panel_summary: Optional[str] = None,
+) -> str:
+    """Compose the brief inline-chat line shown after the artifact closes.
+
+    Pulls the ``price`` / ``pe_ttm`` / ``roe_pct`` snapshot from each
+    ticker's gathered fundamentals so the chat user sees the headline
+    numbers at a glance. The full table + analyst synthesis lives in
+    the artifact pane on the right.
+    """
+    if not gathered:
+        return "Stock research complete. Full report in the artifact pane →\n"
+
+    bullets: List[str] = []
+    for entry in gathered:
+        ticker = entry.get("ticker") or "?"
+        fund = entry.get("fund") or {}
+        price = fund.get("price")
+        pe = fund.get("pe_ttm") or fund.get("forward_pe")
+        roe = fund.get("roe_pct")
+        bits: List[str] = []
+        if price is not None:
+            bits.append(f"${price}")
+        if pe is not None:
+            bits.append(f"{pe:.1f}× P/E" if isinstance(pe, (int, float)) else f"{pe} P/E")
+        if roe is not None:
+            try:
+                bits.append(f"{float(roe):.1f}% ROE")
+            except (TypeError, ValueError):
+                pass
+        line = f"**{ticker}** — {', '.join(bits) if bits else 'data captured'}"
+        bullets.append(line)
+
+    head = " · ".join(bullets) if len(bullets) <= 2 else "\n- " + "\n- ".join(bullets)
+    pieces = [head, "Full report in the artifact pane →"]
+    if panel_summary:
+        pieces.insert(1, panel_summary)
+    return "\n\n".join(pieces) + "\n"
+
+
 async def run(
     query: str,
     decision: Optional[RouteDecision] = None,
@@ -571,58 +548,66 @@ async def run(
 ) -> AsyncIterator[PanelEvent]:
     """Run the Stock Research flow.
 
+    Fix 3 layout: a brief italic chat status line, then a markdown
+    artifact in LibreChat's side pane containing the full structured
+    report (and panel debate if requested), then a one-line chat
+    summary with the headline numbers. No banner headers, no
+    "For each ticker we will: 1) Probe..." preamble, no per-tool
+    "🔗 Orchestrator → US Stock Agent · ..." narration.
+
     The decision's ``tickers`` list drives the work. If it's empty, we
     ask the user to be more specific instead of running an expensive
     full panel against the wrong thing.
     """
+    from src.core.artifacts import (
+        artifact_body,
+        chat_text,
+        close_artifact,
+        open_artifact,
+        safe_id,
+        status,
+    )
+
     decision = decision or {}
     tickers = decision.get("tickers") or []
     tickers = [t for t in tickers if t][:MAX_TICKERS_PER_REQUEST]
 
+    # Empty-ticker fallback stays inline — no point opening an artifact
+    # for a "tell me which ticker" prompt.
     if not tickers:
-        yield {"type": "header", "text": "# 📄 Stock Research\n\n"}
-        yield {
-            "type": "text",
-            "text": (
-                "The router classified your question as stock research, but "
-                "couldn't identify a specific ticker or company name.\n\n"
-                "Try one of:\n"
-                "- `Research NVDA`\n"
-                "- `Tell me about Tesla`\n"
-                "- `Analyse Tata Consultancy (TCS)`\n\n"
-                "_No agent calls are being made — add a ticker and re-ask._\n\n"
-            ),
-            "persona": "orchestrator",
-        }
+        yield chat_text(
+            "I couldn't identify a specific ticker or company in that "
+            "query. Try `Research NVDA` / `Tell me about Tesla` / "
+            "`Analyse TCS`.\n"
+        )
         return
 
-    # Header + TOC
     label = ", ".join(tickers)
-    yield {"type": "header", "text": f"# 📄 Stock Research: {label}\n\n"}
     want_panel = bool(decision.get("want_panel"))
-    toc_lines = [
-        f"**Your query:** _{query.strip().rstrip('?.!')}_\n",
-        "",
-        "For each ticker we will:",
-        "1. Probe the right Stock Agent (US vs Indian).",
-        "2. Fetch live fundamentals.",
-        "3. Pull a company brief + recent news from the Research Agent.",
-        "4. Write a neutral analyst synthesis (single LLM call).",
-    ]
+
+    # 1) Brief inline status before the artifact opens. Two lines is
+    #    plenty - more would feel like the old templated narration.
     if want_panel:
-        toc_lines.append(
-            "5. Run the **3-persona investor panel** on the ticker(s) "
-            "(Buffett / Wood / Graham), since you explicitly asked for a panel view."
+        yield status(
+            f"Researching {label} with full investor panel "
+            f"(Buffett / Wood / Graham, ~60-180s)..."
         )
     else:
-        toc_lines.append(
-            "\n_Skipping the 3-persona panel debate — you asked for "
-            "research, not a debate. Include words like "
-            "\"panel view\" or \"debate\" in your next query to run the full panel._"
-        )
-    yield {"type": "text", "text": "\n".join(toc_lines) + "\n\n---\n", "persona": "orchestrator"}
+        yield status(f"Researching {label}...")
 
-    # Run each ticker through the pipeline
+    # 2) Open the artifact. Everything yielded between here and
+    #    close_artifact lands inside the side pane.
+    artifact_title = (
+        f"Stock Research + Panel: {label}" if want_panel
+        else f"Stock Research: {label}"
+    )
+    yield open_artifact(
+        identifier=safe_id(f"stock-research-{label}"),
+        title=artifact_title,
+    )
+    yield artifact_body(f"# {artifact_title}\n\n")
+
+    # 3) Stream each ticker's research into the artifact body.
     gathered: List[Dict[str, Any]] = []
     for ticker in tickers:
         async for ev in _research_single_ticker(
@@ -634,15 +619,84 @@ async def run(
                 continue
             yield ev
 
-    # Optional: full investor panel on the researched tickers
+    # 4) Optional panel debate (also streams into the artifact).
+    panel_summary: Optional[str] = None
     if want_panel and gathered:
         async for ev in _run_panel_on_tickers(query, gathered, user_id=user_id):
+            if ev.get("type") == "_panel_summary":
+                panel_summary = ev.get("text")  # type: ignore[assignment]
+                continue
             yield ev
+
+    # 5) Close the artifact and emit the brief chat summary.
+    yield close_artifact()
+    yield chat_text(
+        _build_research_chat_summary(gathered, panel_summary=panel_summary)
+    )
 
 
 # ---------------------------------------------------------------------------
 # Optional panel over the researched tickers
 # ---------------------------------------------------------------------------
+_STANCE_GLYPHS: Dict[str, str] = {
+    "bullish": "🟢",
+    "neutral": "⚪",
+    "cautious": "🟡",
+    "bearish": "🔴",
+}
+
+
+def _build_panel_chat_summary(scratchpad: "PanelScratchpad") -> str:  # type: ignore[name-defined]
+    """One-line stance summary for the chat (full debate is in the artifact).
+
+    Reads the FINAL-round entry for each persona and renders a
+    compact glyph + stance line, e.g.::
+
+        🟡 Buffett cautious · 🟡 Wood cautious · 🔴 Graham bearish — converged Round 2
+
+    The :class:`PanelScratchpad` stores its data as a flat list of
+    ``entries`` (each with ``round``, ``persona``, ``stance`` etc.), so
+    we group by persona, pick the highest-round entry per persona, and
+    sort them in canonical persona order via ``PERSONA_ORDER``.
+
+    Defensive: if the scratchpad shape isn't what we expect, returns
+    "" and the caller falls back to a generic "Full report in the
+    artifact pane" line.
+    """
+    from src.core.debate import PERSONA_ORDER
+
+    try:
+        entries = list(getattr(scratchpad, "entries", []) or [])
+        if not entries:
+            return ""
+        max_round = max(e.round for e in entries)
+
+        # Final entry per persona name (latest round they participated in)
+        latest_by_persona: Dict[str, Any] = {}
+        for entry in entries:
+            current = latest_by_persona.get(entry.persona)
+            if current is None or entry.round > current.round:
+                latest_by_persona[entry.persona] = entry
+    except Exception:
+        return ""
+
+    parts: List[str] = []
+    for persona in PERSONA_ORDER:
+        entry = latest_by_persona.get(persona.name)
+        if entry is None:
+            continue
+        # Use the canonical persona name (e.g. "Buffett") rather than
+        # the full title with parens (e.g. "Warren Buffett (Value)").
+        short_name = persona.title.split("(")[0].strip().split()[-1]
+        stance = (entry.stance or "neutral").lower()
+        glyph = _STANCE_GLYPHS.get(stance, "⚪")
+        parts.append(f"{glyph} {short_name} {stance}")
+
+    if not parts:
+        return ""
+    return " · ".join(parts) + f" — converged Round {max_round}"
+
+
 async def _run_panel_on_tickers(
     query: str,
     gathered: List[Dict[str, Any]],
@@ -655,6 +709,16 @@ async def _run_panel_on_tickers(
     fundamentals/news so the personas' existing prompts + tools apply
     without code changes, then hands off to the shared
     :func:`src.core.debate.run_debate_loop` used by portfolio_analysis.
+
+    Fix 3: this function streams its content into the open artifact
+    (the caller has already opened it). It still uses markdown
+    headers like ``## Investor Panel Debate`` and ``### Moderator —
+    Opening`` because those render as section headers within the
+    artifact pane, not as a banner in chat.
+
+    Yields one bookkeeping event ``{"type": "_panel_summary", "text": "..."}``
+    just before returning so the caller can include the stance one-liner
+    in the inline chat summary.
     """
     from src.core.debate import PanelScratchpad, run_debate_loop
     from src.core.flows.portfolio_analysis import (
@@ -665,18 +729,9 @@ async def _run_panel_on_tickers(
     ctx = _synthetic_portfolio_ctx(gathered)
 
     yield {
-        "type": "header",
-        "text": "\n## 🎙 Investor Panel Debate (3-Round Sequential)\n\n### Moderator — Opening\n\n",
-    }
-    yield {
         "type": "text",
-        "text": (
-            "_Panel debate requested on the researched stock(s). This "
-            "debate runs **sequentially**: each analyst sees every "
-            "earlier speaker's argument before speaking. Up to three "
-            "rounds, with early exit on stance convergence._\n\n"
-        ),
-        "persona": "moderator",
+        "text": "\n## Investor Panel Debate\n\n### Moderator — Opening\n\n",
+        "persona": "orchestrator",
     }
     mod_ctx_block = ctx.moderator_context_block()
 
@@ -714,15 +769,12 @@ async def _run_panel_on_tickers(
         yield {"type": "error", "text": "Debate loop finished without a scratchpad."}
         return
 
-    # Closing brief grounded in the full transcript
-    yield {"type": "header", "text": "\n### Moderator — Closing Brief\n\n"}
+    # Closing brief grounded in the full transcript - rendered as a
+    # markdown header inside the artifact (no banner-style emission).
     yield {
         "type": "text",
-        "text": (
-            "_Synthesising the full multi-round transcript "
-            "(not just the final verdicts)…_\n\n"
-        ),
-        "persona": "moderator",
+        "text": "\n### Moderator — Closing Brief\n\n",
+        "persona": "orchestrator",
     }
     transcript = _format_scratchpad_for_moderator(scratchpad)
     # Feed the moderator the FULL synthetic-portfolio context (not just
@@ -760,3 +812,10 @@ async def _run_panel_on_tickers(
         error_label="moderator synthesis",
     ):
         yield {"type": "text", "text": chunk, "persona": "moderator"}
+
+    # Pass the stance one-liner up to the caller (run) so it can include
+    # it in the inline chat summary. This is a bookkeeping event, not
+    # rendered to the user directly.
+    summary_text = _build_panel_chat_summary(scratchpad)
+    if summary_text:
+        yield {"type": "_panel_summary", "text": summary_text}
