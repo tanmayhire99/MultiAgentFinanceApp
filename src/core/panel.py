@@ -695,19 +695,13 @@ async def _orchestrator_fetch_portfolio(
     ``{"type": "_portfolio_ready", "ctx": PortfolioContext}`` payload
     the caller consumes to pass context to the moderator and personas.
     """
-    yield {
-        "type": "header",
-        "text": "## 🧭 1. Portfolio Overview\n\n",
-    }
+    # Section header is kept (it's structural markdown, not banner-style
+    # narration). The "_The orchestrator is now reaching out..._" dev
+    # paragraph that used to live here was Fix-3 cleanup — it was
+    # dev-trace bleeding into the user response.
     yield {
         "type": "text",
-        "text": (
-            "_The orchestrator is now reaching out to the **Portfolio "
-            "Agent** (your Upstox broker, mocked for this demo) to fetch "
-            "your holdings and compute a few baseline metrics. These "
-            "metrics are deterministic — computed in Python, not by an "
-            "LLM — so you can trust them._\n\n"
-        ),
+        "text": "## Portfolio Overview\n\n",
         "persona": "orchestrator",
     }
 
@@ -915,21 +909,12 @@ async def _orchestrator_market_snapshot(
         :_SNAPSHOT_TOP_N
     ]
     snap_count = len(holdings_to_snap)
-    yield {
-        "type": "header",
-        "text": "\n## 📈 2. Market Snapshot — All Holdings\n\n",
-    }
+    # Section header only - the dev-narration paragraph that explained
+    # what the orchestrator was about to do was removed in Fix 3 to
+    # match Claude-style "show, don't tell" UX.
     yield {
         "type": "text",
-        "text": (
-            f"_The orchestrator is now consulting the **Stock Agents** and "
-            f"**Research Agent** for **all {snap_count} of your holdings** "
-            f"(not just a top-N slice). This gives the panel live "
-            f"fundamentals and recent catalysts for every position, so "
-            f"personas can reason about the whole portfolio without "
-            f"re-fetching data themselves. Each call goes to a different "
-            f"MCP worker._\n\n"
-        ),
+        "text": f"\n## Market Snapshot — {snap_count} Holdings\n\n",
         "persona": "orchestrator",
     }
 
@@ -1066,20 +1051,10 @@ async def _orchestrator_qualitative_enrichment(
     if not ctx.holdings:
         return
 
-    yield {
-        "type": "header",
-        "text": "\n## 🔬 Qualitative Enrichment\n\n",
-    }
+    # Section header only - dev-narration removed in Fix 3.
     yield {
         "type": "text",
-        "text": (
-            "_Pre-fetching **moat signals**, **growth metrics** and "
-            "**defensive metrics** for every holding in parallel so the "
-            "panel personas have the full qualitative picture in "
-            "context - not just price + P/E. One visible handoff per "
-            "tool type summarises what's happening; the actual fetches "
-            "run concurrently under the hood._\n\n"
-        ),
+        "text": "\n## Qualitative Enrichment\n\n",
         "persona": "orchestrator",
     }
 
