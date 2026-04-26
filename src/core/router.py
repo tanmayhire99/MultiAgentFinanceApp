@@ -435,6 +435,23 @@ _META_HELP_PATTERNS = (
     re.compile(r"\bwhat\s+(?:is|are)\s+(?:this(?:\s+(?:app|tool|bot|assistant|system))?|finai)\b", re.IGNORECASE),
     # "what features do / does this / you have"
     re.compile(r"\bwhat\s+features\s+(?:do|does)\s+(?:this|you)\b", re.IGNORECASE),
+    # Bare-report request (no subject): "generate detailed report",
+    # "give me a comprehensive report", "make me a quick report",
+    # "please write a document", "can you produce a report?". The
+    # WHOLE query must be just the report ask + optional politeness;
+    # any trailing subject ("...on WDC", "...for my portfolio") falls
+    # through to the LLM router so it can pick the right intent.
+    # meta_help.py renders a focused "what subject?" nudge for these.
+    re.compile(
+        r"^\s*(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+        r"(?:generate|make|create|give\s+me|show\s+me|produce|"
+        r"write|draft|build|prepare)"
+        r"(?:\s+(?:a|an|the|me|us|some|that|this))?"
+        r"(?:\s+\w+){0,3}?"
+        r"\s+(?:report|artifact|document)"
+        r"\s*[!.?]?\s*$",
+        re.IGNORECASE,
+    ),
 )
 
 

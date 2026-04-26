@@ -141,6 +141,55 @@ _FOLLOWUP = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Special case: user asked for a report but didn't name a subject
+# ---------------------------------------------------------------------------
+# A query like "generate detailed report" trips ``wants_artifact=True``
+# in the dispatcher (because the user clearly wants the artifact pane)
+# but the LLM router can't pin a subject - no ticker, no portfolio
+# reference, no concept word - so it falls back to ``meta_help``. The
+# right answer is NOT to dump the full capabilities listing on them;
+# it's to ask one focused question: "what subject?".
+_REPORT_REQUEST_NUDGE = (
+    "## Sure — what would you like a report on?\n\n"
+    "I can generate the report into the artifact side pane, but I "
+    "need a subject. Try one of these:\n\n"
+    "| Want… | Type something like… |\n"
+    "|---|---|\n"
+    "| A single-stock deep-dive | `tell me about WDC, generate report` |\n"
+    "| A portfolio review | `analyse my portfolio, generate report` |\n"
+    "| Promises-vs-reality on a stock | `did Tesla deliver on FSD?, generate report` |\n"
+    "| A macro / sector brief | `outlook for Indian IT, generate report` |\n\n"
+    "_Without a subject I can't pull live data — every number FinAI "
+    "shows is fetched at request time from a named source, so I need "
+    "to know which company / portfolio / topic to fetch._\n"
+)
+
+_REPORT_KEYWORDS = ("report", "artifact", "document")
+
+
+def _looks_like_subjectless_report_request(
+    query: str, decision: Optional[RouteDecision]
+) -> bool:
+    """True iff the user clearly asked for a report but named no subject.
+
+    Two signals must coincide:
+    * the dispatcher set ``decision["wants_artifact"]=True`` (user
+      intent to see the side pane), AND
+    * the query mentions a report / artifact / document keyword (so
+      the request was really about a *report*, not about FinAI itself).
+
+    If either signal is missing, the user is just asking generic
+    "what can you do?" - we show the full capabilities listing.
+    """
+    if not decision:
+        return False
+    if not decision.get("wants_artifact"):
+        return False
+    q_lower = query.lower()
+    return any(kw in q_lower for kw in _REPORT_KEYWORDS)
+
+
 def _capabilities_text() -> str:
     """Single source of truth for the static capabilities response.
 
@@ -158,12 +207,29 @@ async def run(
 ) -> AsyncIterator[PanelEvent]:
     """Emit the curated FinAI capabilities answer.
 
-    Unlike every other flow in this package, ``meta_help.run`` makes
-    **zero LLM calls**. It streams a static markdown document. The
-    function is still ``async`` and yields :class:`PanelEvent` dicts so
-    the SSE renderer treats it like any other flow.
+    Two response shapes:
+
+    * Plain meta query ("what can you do?", "tell me about FinAI") →
+      stream the full capabilities listing (the original Fix 1
+      behaviour).
+    * Report-without-subject ("generate detailed report",
+      "/report ", "make me a comprehensive document") → stream a
+      short, focused nudge asking *what* the user wants the report on.
+      Suppresses the long capabilities tour because the user has
+      shown they know FinAI exists - they just need a subject prompt.
+
+    Both paths make ZERO LLM calls (static markdown only).
     """
     log.debug("meta_help flow invoked for query=%r", query[:80])
+
+    if _looks_like_subjectless_report_request(query, decision):
+        yield {
+            "type": "text",
+            "text": _REPORT_REQUEST_NUDGE,
+            "persona": "orchestrator",
+        }
+        return
+
     yield {
         "type": "text",
         "text": _capabilities_text(),
