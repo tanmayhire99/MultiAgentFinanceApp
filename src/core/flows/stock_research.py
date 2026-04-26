@@ -332,24 +332,31 @@ async def _research_single_ticker(
 ) -> AsyncIterator[PanelEvent]:
     """Run the focused research pipeline for one ticker.
 
-    Yields ONLY the rendered report sections plus a final
-    ``{"type": "_ticker_ready", "data": {...}}`` event the caller
-    consumes to build a synthetic panel context.
+    Yield shape (Fix 3 — chat-progress version):
 
-    Fix 3 design: this function stays silent on the wire about the
-    individual MCP tool calls (no ``tool_call`` / ``tool_result``
-    events, no "_Probing where X is listed_" narration). The caller
-    (``run``) emits a brief italic chat status line BEFORE the
-    artifact opens; everything this function yields lands inside
-    the artifact body.
+    * ``{"type": "_status", "text": "<short status line>"}`` — chat
+      status events the caller emits to LibreChat's chat pane BEFORE
+      it opens the artifact. These show real-time progress so the
+      user isn't staring at a frozen chat for 60-180s.
+    * ``{"type": "text", ...}`` — rendered report sections that the
+      caller forwards into the open artifact's body. The first such
+      event is the cue for the caller to call ``open_artifact()``.
+    * ``{"type": "_ticker_ready", "data": {...}}`` — last event,
+      signals the ticker pipeline is done and hands off the gathered
+      data so the caller can build a synthetic panel context.
 
-    ``user_id`` and ``query`` are carried through only so the single
-    Analyst Synthesis LLM call at the end can be cached / replayed on
-    NIM connection failure (see :mod:`src.core.resilient_stream`).
+    This split lets the caller (``run``) emit several chat-status lines
+    during the fast data-gather phase, then open the artifact and
+    let the slower analyst-synthesis LLM call stream inside it.
+
+    ``user_id`` / ``query`` carry through only so the analyst-synthesis
+    LLM call at the end can be cached / replayed on NIM blinks (see
+    :mod:`src.core.resilient_stream`).
     """
     ticker = ticker.upper().strip()
 
-    # 1) Market resolution (silently — no chat narration)
+    # 1) Market resolution
+    yield {"type": "_status", "text": f"Resolving market location for {ticker}..."}
     try:
         market, quote = await _resolve_market(ticker)
     except Exception as e:
@@ -361,8 +368,11 @@ async def _research_single_ticker(
         return
 
     agent_ns = "us_stock" if market == "us" else "indian_stock"
+    market_pretty = "US exchanges" if market == "us" else "Indian exchanges (NSE/BSE)"
+    yield {"type": "_status", "text": f"✓ {ticker} listed on {market_pretty}"}
 
-    # 2) Fundamentals (silently)
+    # 2) Fundamentals
+    yield {"type": "_status", "text": f"Pulling live fundamentals for {ticker}..."}
     try:
         fund = await _call_tool(f"{agent_ns}__get_fundamentals", {"ticker": ticker})
     except Exception as e:
@@ -371,8 +381,19 @@ async def _research_single_ticker(
         fund = {}
     if not isinstance(fund, dict):
         fund = {}
+    if fund:
+        price = fund.get("price")
+        pe = fund.get("pe_ttm") or fund.get("forward_pe")
+        bits = []
+        if price is not None:
+            bits.append(f"${price}")
+        if pe is not None:
+            bits.append(f"P/E {pe}")
+        snapshot = ", ".join(bits) if bits else "data captured"
+        yield {"type": "_status", "text": f"✓ {ticker}: {snapshot}"}
 
-    # 3) Company brief (silently)
+    # 3) Company brief
+    yield {"type": "_status", "text": f"Fetching company brief for {ticker}..."}
     try:
         brief_resp = await _call_tool("research__get_company_brief", {"ticker": ticker})
     except Exception as e:
@@ -381,8 +402,10 @@ async def _research_single_ticker(
     if not isinstance(brief_resp, dict):
         brief_resp = {"summary": "", "sources": []}
     sources = brief_resp.get("sources") or []
+    yield {"type": "_status", "text": f"✓ Got company brief ({len(sources)} sources)"}
 
-    # 4) Recent news (silently)
+    # 4) Recent news
+    yield {"type": "_status", "text": f"Searching for recent {ticker} catalysts..."}
     try:
         news_resp = await _call_tool(
             "research__search_news", {"ticker": ticker, "max_items": 5}
@@ -393,6 +416,7 @@ async def _research_single_ticker(
     if not isinstance(news_resp, dict):
         news_resp = {}
     news_items = news_resp.get("news") or []
+    yield {"type": "_status", "text": f"✓ Found {len(news_items)} recent catalysts"}
 
     # 5) Render the structured report (this is the artifact-body content)
     company_name = fund.get("name") or brief_resp.get("ticker") or ticker
@@ -437,9 +461,15 @@ async def _research_single_ticker(
         "persona": "orchestrator",
     }
 
-    # 6) Analyst synthesis (single LLM call, no panel). The header is
-    # emitted as plain artifact-body text rather than a "header" event
-    # so it lands cleanly inside the side-pane markdown.
+    # 6) Analyst synthesis (single LLM call, no panel). One last
+    # chat-status line right before the artifact starts streaming —
+    # so the user sees "synthesis happening now, watch the side pane".
+    # The header itself is emitted as plain artifact-body text (not a
+    # "header" event) so it lands cleanly inside the side-pane markdown.
+    yield {
+        "type": "_status",
+        "text": f"Generating analyst synthesis for {ticker} (streams to artifact)...",
+    }
     yield {
         "type": "text",
         "text": "\n### Analyst Synthesis\n\n",
@@ -585,51 +615,87 @@ async def run(
     label = ", ".join(tickers)
     want_panel = bool(decision.get("want_panel"))
 
-    # 1) Brief inline status before the artifact opens. Two lines is
-    #    plenty - more would feel like the old templated narration.
+    # 1) Inline status — kept short. The fetch loop below will emit
+    #    several more status updates as data comes in.
     if want_panel:
         yield status(
-            f"Researching {label} with full investor panel "
-            f"(Buffett / Wood / Graham, ~60-180s)..."
+            f"Researching {label} for full investor panel "
+            f"(Buffett / Wood / Graham, ~60-180s)"
         )
     else:
-        yield status(f"Researching {label}...")
+        yield status(f"Researching {label}")
 
-    # 2) Open the artifact. Everything yielded between here and
-    #    close_artifact lands inside the side pane.
+    # 2) Iterate each ticker. The flow yields TWO kinds of events:
+    #    "_status" (goes to chat) and the rest (goes to the artifact).
+    #    We open the artifact lazily on first non-status event so all
+    #    the data-gather progress lands in the chat, and the slower
+    #    rendering / streaming phase fills the artifact pane.
     artifact_title = (
         f"Stock Research + Panel: {label}" if want_panel
         else f"Stock Research: {label}"
     )
-    yield open_artifact(
-        identifier=safe_id(f"stock-research-{label}"),
-        title=artifact_title,
-    )
-    yield artifact_body(f"# {artifact_title}\n\n")
+    artifact_id = safe_id(f"stock-research-{label}")
 
-    # 3) Stream each ticker's research into the artifact body.
+    artifact_open = False
+
+    def _ensure_artifact_open() -> List[PanelEvent]:
+        """Open the artifact on demand and emit the H1 header inside it."""
+        nonlocal artifact_open
+        if artifact_open:
+            return []
+        artifact_open = True
+        return [
+            open_artifact(identifier=artifact_id, title=artifact_title),
+            artifact_body(f"# {artifact_title}\n\n"),
+        ]
+
     gathered: List[Dict[str, Any]] = []
     for ticker in tickers:
         async for ev in _research_single_ticker(
             ticker, user_id=user_id, query=query
         ):
-            if ev.get("type") == "_ticker_ready":
+            etype = ev.get("type")
+            if etype == "_status":
+                # Chat-status event — emit OUTSIDE the artifact. If the
+                # artifact is already open we skip status (it'd land
+                # inside the artifact body, which we don't want).
+                if not artifact_open:
+                    yield status(ev.get("text", ""))
+                continue
+            if etype == "_ticker_ready":
                 if ev.get("data"):
                     gathered.append(ev["data"])  # type: ignore[index]
                 continue
+            # Any other event is artifact-body content. Open the
+            # artifact (if we haven't yet) before forwarding.
+            for opener in _ensure_artifact_open():
+                yield opener
             yield ev
 
-    # 4) Optional panel debate (also streams into the artifact).
+    # 3) Optional panel debate. Same routing rules apply:
+    #    "_status" -> chat (only if artifact still closed),
+    #    "_panel_summary" -> bookkeeping for the closing chat line,
+    #    everything else -> artifact body.
     panel_summary: Optional[str] = None
     if want_panel and gathered:
         async for ev in _run_panel_on_tickers(query, gathered, user_id=user_id):
-            if ev.get("type") == "_panel_summary":
+            etype = ev.get("type")
+            if etype == "_status":
+                if not artifact_open:
+                    yield status(ev.get("text", ""))
+                continue
+            if etype == "_panel_summary":
                 panel_summary = ev.get("text")  # type: ignore[assignment]
                 continue
+            for opener in _ensure_artifact_open():
+                yield opener
             yield ev
 
-    # 5) Close the artifact and emit the brief chat summary.
-    yield close_artifact()
+    # 4) Close the artifact (only if it was opened) and emit the chat
+    #    summary. If we never opened an artifact (e.g. zero tickers
+    #    succeeded), the chat summary stands alone.
+    if artifact_open:
+        yield close_artifact()
     yield chat_text(
         _build_research_chat_summary(gathered, panel_summary=panel_summary)
     )
