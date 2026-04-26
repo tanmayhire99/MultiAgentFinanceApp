@@ -73,6 +73,30 @@ def _max_seconds() -> float:
         return _DEFAULT_MAX_SECONDS
 
 
+def _format_deep_agent_error(e: Exception) -> str:
+    """Translate a raw deep-agent exception into a user-friendly message.
+
+    The deep research flow uses the ``deepagents`` middleware which can
+    fail in non-obvious ways — most commonly when the running message
+    history exceeds the underlying model's context window, in which
+    case the OpenAI-compat client raises a ``BadRequestError`` with a
+    ``max_tokens must be at least 1, got -N`` message. Surface a
+    plain-English explanation instead of dumping the stack trace into
+    the chat.
+    """
+    raw = str(e)
+    lower = raw.lower()
+    if "max_tokens must be at least 1" in lower or "context length" in lower or "context_length_exceeded" in lower:
+        return (
+            "The deep-research agent's investigation grew too large for the "
+            "model's context window. Try a more focused question — e.g. a "
+            "single specific claim or quarter — or fall back to the regular "
+            "**stock research** flow (`tell me about <ticker>`) for a faster, "
+            "lighter analysis."
+        )
+    return f"Deep-research agent failed mid-run: {raw}"
+
+
 # ---------------------------------------------------------------------------
 # System prompt - the "detailed prompt" that turns a shallow ReAct agent
 # into a Deep Agent per Harrison Chase's description.
@@ -465,7 +489,7 @@ async def run(
         log.exception("Deep research agent crashed")
         yield {
             "type": "error",
-            "text": f"Deep-research agent failed mid-run: {e}",
+            "text": _format_deep_agent_error(e),
         }
         return
 

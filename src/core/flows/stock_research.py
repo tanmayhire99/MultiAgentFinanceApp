@@ -192,16 +192,18 @@ def _fundamentals_table(fund: Dict[str, Any], market: str) -> str:
         "|---|---|",
         f"| Market | {market_label} |",
         f"| Price | {price_str} |",
-        f"| 52-week range | {_v(fund, 'fifty_two_week_low', '')} – {_v(fund, 'fifty_two_week_high', '')} |",
         f"| Market cap (USD bn) | {_v(fund, 'market_cap_bn', '')} |",
         f"| P/E (TTM) | {_v(fund, 'pe_ttm')} |",
         f"| Forward P/E | {_v(fund, 'forward_pe')} |",
-        f"| Price / Book | {_v(fund, 'price_to_book')} |",
+        f"| P/B | {_v(fund, 'pb')} |",
+        f"| P/S | {_v(fund, 'ps')} |",
         f"| ROE | {_v(fund, 'roe_pct', '%')} |",
+        f"| ROA | {_v(fund, 'roa_pct', '%')} |",
+        f"| Gross margin | {_v(fund, 'gross_margin_pct', '%')} |",
         f"| Operating margin | {_v(fund, 'operating_margin_pct', '%')} |",
-        f"| Net margin | {_v(fund, 'net_margin_pct', '%')} |",
+        f"| Net margin | {_v(fund, 'profit_margin_pct', '%')} |",
         f"| Debt / Equity | {_v(fund, 'debt_to_equity')} |",
-        f"| Dividend yield | {_v(fund, 'dividend_yield_pct', '%')} |",
+        f"| Revenue (USD bn TTM) | {_v(fund, 'revenue_bn_ttm', '')} |",
     ]
     return "\n".join(rows)
 
@@ -241,15 +243,19 @@ def _format_analyst_input(
     lines.append("\nLive fundamentals (stock agent):")
     for k in (
         "price",
+        "market_cap_bn",
         "pe_ttm",
         "forward_pe",
-        "price_to_book",
+        "pb",
+        "ps",
         "roe_pct",
+        "roa_pct",
+        "gross_margin_pct",
         "operating_margin_pct",
-        "net_margin_pct",
+        "profit_margin_pct",
         "debt_to_equity",
-        "dividend_yield_pct",
-        "market_cap_bn",
+        "revenue_bn_ttm",
+        "net_income_bn_ttm",
     ):
         if fund.get(k) not in (None, ""):
             lines.append(f"- {k}: {fund[k]}")
@@ -462,13 +468,13 @@ async def _research_single_ticker(
     }
 
     # 6) Analyst synthesis (single LLM call, no panel). One last
-    # chat-status line right before the artifact starts streaming —
-    # so the user sees "synthesis happening now, watch the side pane".
-    # The header itself is emitted as plain artifact-body text (not a
-    # "header" event) so it lands cleanly inside the side-pane markdown.
+    # chat-status line right before the synthesis starts streaming.
+    # In artifact mode the side pane fills in; in inline mode the
+    # synthesis lands directly in the chat. Either way the user sees
+    # progress, so the status line is mode-agnostic.
     yield {
         "type": "_status",
-        "text": f"Generating analyst synthesis for {ticker} (streams to artifact)...",
+        "text": f"Generating analyst synthesis for {ticker}...",
     }
     yield {
         "type": "text",

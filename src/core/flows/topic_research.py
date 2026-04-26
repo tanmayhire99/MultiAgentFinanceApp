@@ -197,11 +197,11 @@ async def run(
     yield {"type": "header", "text": "\n### Analyst Briefing\n\n"}
     yield {
         "type": "text",
-        "text": "_Synthesising the top results with GPT-OSS-120B…_\n\n",
+        "text": "_Synthesising the top results into a briefing…_\n\n",
         "persona": "moderator",
     }
 
-    llm = build_chat_model(temperature=0.2, max_tokens=700, streaming=True)
+    llm = build_chat_model(temperature=0.2, max_tokens=1400, streaming=True)
     summary_input = _format_results_for_llm(results, answer)
     messages = [
         SystemMessage(content=_SYSTEM),

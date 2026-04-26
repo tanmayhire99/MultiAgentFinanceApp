@@ -232,7 +232,7 @@ async def _run_analyst_summary_branch(
     ]
 
     async def _stream() -> AsyncIterator[str]:
-        llm = build_chat_model(temperature=0.2, max_tokens=900, streaming=True)
+        llm = build_chat_model(temperature=0.2, max_tokens=1600, streaming=True)
         async for chunk in llm.astream(messages):
             text = getattr(chunk, "content", None)
             if text:

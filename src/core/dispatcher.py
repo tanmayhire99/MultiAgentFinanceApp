@@ -174,8 +174,26 @@ _ARTIFACT_PHRASES = _re.compile(
 # calls :func:`src.core.pipeline.run_pipeline`. The static flows
 # continue to handle every other turn unchanged. Auto-routing per
 # intent lands post-demo.
+#
+# The detection itself is gated by ``FINAI_PLANNER_PREFIX`` so an
+# operator can disable the slash command at runtime (e.g. for a
+# customer-facing demo where the planner-first pipeline isn't
+# production-ready yet). Default is ON.
 _PLANNER_PREFIXES = ("/planner ", "/planner\t")
 _PLANNER_BARE = "/planner"
+
+
+def _env_planner_prefix_enabled() -> bool:
+    """Whether ``/planner`` prefix detection is active.
+
+    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
+    Default is ON when the env var is unset. Set
+    ``FINAI_PLANNER_PREFIX=0`` to suppress prefix recognition; queries
+    starting with ``/planner`` will then route through the normal
+    classifier instead of the planner pipeline.
+    """
+    raw = (os.getenv("FINAI_PLANNER_PREFIX") or "1").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def _strip_planner_prefix(query: str) -> Tuple[str, bool]:
@@ -187,7 +205,13 @@ def _strip_planner_prefix(query: str) -> Tuple[str, bool]:
     the flag and leaves an empty query — the classifier will treat
     that as default and the planner pipeline will surface a useful
     error.
+
+    Returns ``(query, False)`` unchanged if
+    :func:`_env_planner_prefix_enabled` is False — the prefix is then
+    treated as ordinary text and routes through the normal classifier.
     """
+    if not _env_planner_prefix_enabled():
+        return query, False
     q = query.lstrip()
     lower = q.lower()
     for prefix in _PLANNER_PREFIXES:

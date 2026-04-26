@@ -4,12 +4,14 @@ Coverage:
 
 1. ``_strip_planner_prefix`` — leading prefix detection (with/without
    trailing space, case-insensitive, bare ``/planner``).
-2. ``planner_pipeline._derive_intent_flags`` — the deterministic
+2. ``FINAI_PLANNER_PREFIX`` env-var gate — when set to a falsy value,
+   the prefix is treated as ordinary text and detection is skipped.
+3. ``planner_pipeline._derive_intent_flags`` — the deterministic
    classifier-intent → flag-vocab mapping.
-3. End-to-end: a ``/planner`` prefixed query routes through
+4. End-to-end: a ``/planner`` prefixed query routes through
    ``planner_pipeline.run`` instead of the static flow it would
    normally hit.
-4. Disclaimer footer still fires for finance flows even when routed
+5. Disclaimer footer still fires for finance flows even when routed
    through the planner pipeline.
 
 Run via::
@@ -31,7 +33,19 @@ from src.core.flows.planner_pipeline import _derive_intent_flags
 # ---------------------------------------------------------------------------
 # Prefix detection
 # ---------------------------------------------------------------------------
+# These tests exercise the parsing logic ASSUMING the env-var gate is on
+# (default for development). The demo container ships with
+# FINAI_PLANNER_PREFIX=0, which is exercised separately by
+# PlannerPrefixGateTests below. Explicitly set the env var here so the
+# tests pass regardless of the host environment.
 class StripPlannerPrefixTests(unittest.TestCase):
+    def setUp(self):
+        self._env_patch = patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": "1"})
+        self._env_patch.start()
+
+    def tearDown(self):
+        self._env_patch.stop()
+
     def test_with_trailing_space(self):
         q, force = _strip_planner_prefix("/planner did Tesla deliver on FSD?")
         self.assertEqual(q, "did Tesla deliver on FSD?")
@@ -73,6 +87,45 @@ class StripPlannerPrefixTests(unittest.TestCase):
         q, force = _strip_planner_prefix("   /planner topic question")
         self.assertEqual(q, "topic question")
         self.assertTrue(force)
+
+
+# ---------------------------------------------------------------------------
+# Env-var gate
+# ---------------------------------------------------------------------------
+class PlannerPrefixGateTests(unittest.TestCase):
+    """``FINAI_PLANNER_PREFIX=0`` makes the prefix invisible."""
+
+    def test_disabled_env_returns_query_unchanged(self):
+        with patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": "0"}):
+            q, force = _strip_planner_prefix("/planner did Tesla deliver?")
+            self.assertEqual(q, "/planner did Tesla deliver?")
+            self.assertFalse(force)
+
+    def test_disabled_env_also_handles_bare(self):
+        with patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": "0"}):
+            q, force = _strip_planner_prefix("/planner")
+            self.assertEqual(q, "/planner")
+            self.assertFalse(force)
+
+    def test_falsy_values_disable(self):
+        for val in ("0", "false", "no", "off", "FALSE"):
+            with patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": val}):
+                _q, force = _strip_planner_prefix("/planner test")
+                self.assertFalse(force, f"value {val!r} should disable")
+
+    def test_truthy_values_enable(self):
+        for val in ("1", "true", "yes", "on", "True"):
+            with patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": val}):
+                _q, force = _strip_planner_prefix("/planner test")
+                self.assertTrue(force, f"value {val!r} should enable")
+
+    def test_default_unset_is_enabled(self):
+        # Remove the env var to make sure the default (ON) kicks in
+        env = os.environ.copy()
+        env.pop("FINAI_PLANNER_PREFIX", None)
+        with patch.dict(os.environ, env, clear=True):
+            _q, force = _strip_planner_prefix("/planner test")
+            self.assertTrue(force, "default (unset) should be enabled")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +189,16 @@ class DeriveIntentFlagsTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class DispatcherRoutingTests(unittest.IsolatedAsyncioTestCase):
     """End-to-end via ``run_analysis`` with everything but the flow mocked."""
+
+    def setUp(self):
+        # These tests exercise the /planner detection path; force the
+        # env-var gate ON regardless of the host's runtime config (the
+        # demo container ships with it OFF).
+        self._env_patch = patch.dict(os.environ, {"FINAI_PLANNER_PREFIX": "1"})
+        self._env_patch.start()
+
+    def tearDown(self):
+        self._env_patch.stop()
 
     async def _drain(self, query: str) -> List[Any]:
         events: List[Any] = []
