@@ -224,8 +224,18 @@ async def run_analysis(
         log.warning("Dispatcher received unknown intent %r; using educational", intent)
         flow = _FLOW_MAP["educational"]
 
+    # Per-tool narration events (`tool_call`, `tool_result`) and
+    # ``header`` banner events are dev-facing trace. We strip them from
+    # the user-visible stream unless verbose_trace is on. The flows
+    # also stop emitting many of these in Fix 3, but we filter
+    # centrally so the gating is uniform across every flow - including
+    # the persona panel and deepagents harness which we're not
+    # rewriting.
+    _DEV_TRACE_EVENT_TYPES = frozenset({"tool_call", "tool_result"})
     try:
         async for ev in flow(query, decision, user_id):
+            if not verbose_trace and ev.get("type") in _DEV_TRACE_EVENT_TYPES:
+                continue
             yield ev
     except Exception as e:
         log.exception("Flow %s crashed", intent)
