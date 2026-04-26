@@ -55,7 +55,7 @@ architecture it covers.
 | Stage | Tag | What lands |
 |---|---|---|
 | 1 | `migration/day-4-slice-factories` | ✅ Factories for the 4 agents the claim-tracker slice needs |
-| 2 | `migration/day-6-7-slice-engine` | planner + sequential DAG executor + pipeline orchestrator |
+| 2 | [`migration/day-6-7-slice-engine`](DAY_6_7_SLICE_ENGINE.md) | ✅ planner + sequential DAG executor + pipeline orchestrator (28 tests) |
 | 3 | `migration/day-10-claim-slice` | dispatcher wiring; `/planner did Tesla deliver on FSD?` works end-to-end |
 | 4 | `migration/day-4b-panel-factories` | Factories for the 4 panel-slice agents (us_stock / indian_stock / portfolio / panel) |
 | 5 | `migration/day-10b-panel-slice` | `/planner` panel queries route through new pipeline |
