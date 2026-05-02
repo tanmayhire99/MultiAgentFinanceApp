@@ -38,6 +38,7 @@ Every "day" of the migration gets:
 | 2 | [`src/core/agents/registry.py`](DAY_2_REGISTRY.md) — Agent catalog + policy gates | rolled into `migration/day-3` | 3 new files |
 | 3 | [`src/core/agents/_base.py`](DAY_3_SCOPED_AGENT.md) — `ScopedAgent` runtime wrapper | **`migration/day-3`** | 2 new files + 3 modified |
 | 4 | [`src/core/agents/_factories.py`](DAY_4_SLICE_FACTORIES.md) — Per-agent ScopedAgent factories (slice subset: research / filings / claim / synthesizer) | **`migration/day-4-slice-factories`** | 2 new files + 2 modified |
+| 4b | [Panel-slice factories + `PanelScopedAgent`](DAY_4B_PANEL_FACTORIES.md) — adds factories for us_stock / indian_stock / portfolio / panel; `_FACTORY_MAP` now covers every registry agent | **`migration/day-4b-panel-factories`** | 1 new file + 3 modified |
 
 > Days 1 and 2 don't have their own git tags because the source code
 > for those days was committed all at once on Day 3 (the project had
@@ -54,10 +55,10 @@ architecture it covers.
 
 | Stage | Tag | What lands |
 |---|---|---|
-| 1 | `migration/day-4-slice-factories` | ✅ Factories for the 4 agents the claim-tracker slice needs |
+| 1 | [`migration/day-4-slice-factories`](DAY_4_SLICE_FACTORIES.md) | ✅ Factories for the 4 agents the claim-tracker slice needs |
 | 2 | [`migration/day-6-7-slice-engine`](DAY_6_7_SLICE_ENGINE.md) | ✅ planner + sequential DAG executor + pipeline orchestrator (28 tests) |
 | 3 | [`migration/day-10-claim-slice`](DAY_10_CLAIM_SLICE.md) | ✅ `/planner` opt-in dispatcher wiring; planner pipeline reachable end-to-end (20 tests) |
-| 4 | `migration/day-4b-panel-factories` | Factories for the 4 panel-slice agents (us_stock / indian_stock / portfolio / panel) |
+| 4 | [`migration/day-4b-panel-factories`](DAY_4B_PANEL_FACTORIES.md) | ✅ Factories for the 4 panel-slice agents (us_stock / indian_stock / portfolio / panel + `PanelScopedAgent` subclass that drives the multi-round persona debate; 15 new tests, 204 total) |
 | 5 | `migration/day-10b-panel-slice` | `/planner` panel queries route through new pipeline |
 
 ## How to roll back
