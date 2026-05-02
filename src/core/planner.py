@@ -172,6 +172,22 @@ wants_historical_news=True, wants_deep_research=True.
 {example_claim_tracking}
 ```
 
+### Example C — panel debate on a portfolio
+User query: "Run a panel debate on my portfolio"
+Intent flags: wants_portfolio_data=True, wants_panel_debate=True.
+
+```json
+{example_panel_portfolio}
+```
+
+### Example D — panel debate on a single stock
+User query: "Run a panel debate on NVDA"
+Intent flags: wants_panel_debate=True.
+
+```json
+{example_panel_stock}
+```
+
 ## Output contract
 
 Return EXACTLY one JSON object. No code fence, no commentary.
@@ -224,6 +240,93 @@ _EXAMPLE_SIMPLE_STOCK = {
     ],
 }
 
+
+_EXAMPLE_PANEL_PORTFOLIO = {
+    "schema_version": "1.0",
+    "goal": "Run a Buffett / Wood / Graham multi-round debate over the user's portfolio holdings, then synthesise a moderator closing brief.",
+    "rationale": "Portfolio-level panel: portfolio_agent surfaces holdings + risks, panel_agent runs the multi-persona debate loop, synthesizer writes the final brief.",
+    "estimated_complexity": "heavy",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Pull the user's holdings, sector allocation, concentration risks, and diversification score via the Portfolio Agent.",
+            "agent": "portfolio_agent",
+            "tool_subset": [
+                "portfolio__get_holdings",
+                "portfolio__get_portfolio_summary",
+                "portfolio__get_sector_allocation",
+                "portfolio__get_concentration_risks",
+                "portfolio__get_diversification_score",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 5,
+        },
+        {
+            "id": 2,
+            "description": "Run the full multi-round Buffett / Wood / Graham investor-panel debate on the portfolio surfaced in step 1.",
+            "agent": "panel_agent",
+            "tool_subset": [],
+            "depends_on": [1],
+            "max_tool_calls": 0,
+        },
+        {
+            "id": 3,
+            "description": "Write the moderator closing brief synthesising the panel debate transcript and verdicts from step 2.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [2],
+            "max_tool_calls": 0,
+        },
+    ],
+}
+
+_EXAMPLE_PANEL_STOCK = {
+    "schema_version": "1.0",
+    "goal": "Run a Buffett / Wood / Graham multi-round debate over NVDA fundamentals + recent catalysts, then synthesise a moderator closing brief.",
+    "rationale": "Single-ticker panel: us_stock_agent pulls live fundamental data, research_agent gets catalysts, panel_agent runs the multi-persona debate loop, synthesizer writes the final brief.",
+    "estimated_complexity": "heavy",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Fetch NVDA live fundamentals, growth metrics, and defensive metrics via the US Stock Agent.",
+            "agent": "us_stock_agent",
+            "tool_subset": [
+                "us_stock__get_fundamentals",
+                "us_stock__get_growth_metrics",
+                "us_stock__get_defensive_metrics",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 5,
+        },
+        {
+            "id": 2,
+            "description": "Pull recent catalysts and a company brief for NVDA via the Research Agent.",
+            "agent": "research_agent",
+            "tool_subset": [
+                "research__get_key_catalysts",
+                "research__get_company_brief",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 4,
+        },
+        {
+            "id": 3,
+            "description": "Run the full multi-round Buffett / Wood / Graham debate on NVDA using fundamentals from step 1 and catalysts from step 2.",
+            "agent": "panel_agent",
+            "tool_subset": [],
+            "depends_on": [1, 2],
+            "max_tool_calls": 0,
+        },
+        {
+            "id": 4,
+            "description": "Write the moderator closing brief synthesising the NVDA panel debate transcript and verdicts from step 3.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [3],
+            "max_tool_calls": 0,
+        },
+    ],
+}
 
 _EXAMPLE_CLAIM_TRACKING = {
     "schema_version": "1.0",
@@ -302,6 +405,8 @@ def _build_system_prompt(
         plan_schema=json.dumps(Plan.model_json_schema(), indent=2),
         example_simple_stock=json.dumps(_EXAMPLE_SIMPLE_STOCK, indent=2),
         example_claim_tracking=json.dumps(_EXAMPLE_CLAIM_TRACKING, indent=2),
+        example_panel_portfolio=json.dumps(_EXAMPLE_PANEL_PORTFOLIO, indent=2),
+        example_panel_stock=json.dumps(_EXAMPLE_PANEL_STOCK, indent=2),
     )
 
 
