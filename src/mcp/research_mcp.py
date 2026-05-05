@@ -25,12 +25,12 @@ User-Agent; no API key required. Indian tools hit BSE's public
 ``curl_cffi`` with a Chrome TLS fingerprint for NSE's Cloudflare-
 protected APIs.
 
-See :mod:`src.agents.workers._research`, :mod:`_sec_edgar`,
+See :mod:`src.mcp._research`, :mod:`_sec_edgar`,
 :mod:`_indian_filings`, and :mod:`_claims` for implementation details.
 
 Run as::
 
-    python -m src.agents.workers.research_mcp
+    python -m src.mcp.research_mcp
 """
 from __future__ import annotations
 
@@ -504,7 +504,7 @@ async def extract_forward_claims(
 
     Only specific, testable commitments are extracted. Hedging
     language ("we aim to", "potentially") is deliberately excluded.
-    See :mod:`src.agents.workers._claims` for the extraction prompt.
+    See :mod:`src.mcp._claims` for the extraction prompt.
 
     If no claims are found, returns ``{"claims": []}`` with
     ``ok: true``. Errors return ``{"claims": [], "error": ...}``.

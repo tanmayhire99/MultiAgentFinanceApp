@@ -1,4 +1,9 @@
-"""Deep Stock Research flow - 2-5 minute multi-step agent with claim tracking.
+"""Deep Stock Research flow — 2-5 minute multi-step agent with claim tracking.
+
+.. deprecated::
+    Superseded by the planner-first pipeline. All queries now route through
+    ``plan()`` → ``execute()`` → ``synthesize()``. Retained for reference
+    and emergency rollback (``FINAI_USE_LEGACY_FLOWS=1``).
 
 Picked by the dispatcher when the router classifies a query as
 ``deep_stock_research``. Unlike ``stock_research`` (fast single-pass
@@ -324,7 +329,7 @@ async def run(
         yield {"type": "error", "text": f"Failed to load MCP tools: {e}"}
         return
 
-    from src.agents.personas.base import build_chat_model
+    from src.personas.base import build_chat_model
 
     # We use the NIM model by default; override with FINAI_DEEP_RESEARCH_MODEL
     # to point at a frontier model (e.g. "openai:gpt-4.1") for better planning
@@ -377,7 +382,7 @@ async def run(
     # Bump LangGraph's default recursion_limit (25) - a full claim-tracking
     # run easily needs 60+ graph steps (plan + 6-10 tool calls + 6-10
     # intermediate LLM turns + final report). 500 matches the persona
-    # recursion limit set in src.agents.personas.base.PERSONA_RECURSION_LIMIT.
+    # recursion limit set in src.personas.base.PERSONA_RECURSION_LIMIT.
     agent_config = {"recursion_limit": 500}
 
     max_secs = _max_seconds()

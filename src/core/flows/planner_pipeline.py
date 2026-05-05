@@ -1,45 +1,27 @@
 """Flow that routes a query through :func:`src.core.pipeline.run_pipeline`.
 
-This is the **bridge** between the dispatcher and the new planner-first
-pipeline (Day 6-7 slice engine):
-
-* The dispatcher routes here when the user opts in via the ``/planner``
-  prefix (Day 10 slice). After the demo we'll layer in an env-var
-  auto-route table; for now the `/planner` prefix is the only entry
-  point so the existing static flows keep handling regular traffic
-  unchanged.
-* This wrapper takes care of turning the pipeline's
-  :class:`PanelEvent` stream into something the dispatcher's existing
-  rendering logic understands - specifically, converting ``_status``
-  events into italic chat-visible text and (optionally) wrapping the
-  synthesizer's report in a LibreChat artifact.
+This is the **canonical execution path** for ALL non-trivial FinAI
+queries. The dispatcher routes here by default; only ``smalltalk``
+and ``meta_help`` take the deterministic fast-path.
 
 Event handling
 --------------
-
-* ``_status`` events from :mod:`src.core.executor` /
-  :mod:`src.core.pipeline` get rewritten into italic chat lines via
-  :func:`src.core.artifacts.status` (matches the static flows' Fix 3
-  status-line UX so the user sees per-step progress in real time).
-* The synthesizer's single ``text`` event (with
-  ``persona="synthesizer"``) carries the user-visible report. When
-  ``decision["wants_artifact"]`` is True we open a LibreChat artifact
-  block first so the report renders in the side pane; otherwise it
-  streams inline in the chat.
-* Other events (``error`` from the pipeline, anything we don't
-  recognise) flow through unchanged so nothing gets dropped.
+* ``_status`` events are turned into italic chat-visible progress
+  lines so the user sees per-step progress in real time.
+* The synthesizer's ``text`` event wraps in a LibreChat artifact
+  when ``decision["wants_artifact"]`` is True; otherwise inline.
+* All step-level events (``step_content``, ``step_tool_call``,
+  ``step_tool_result``) are forwarded to the chat so the user sees
+  agent reasoning in real time.
+* Debate events (``header``, ``text`` from personas, etc.) pass
+  through as-is.
 
 Intent-flag derivation
 ----------------------
-The current classifier emits a coarse ``intent`` enum + ``want_panel``
-boolean, NOT the granular ``intent_flags`` vocabulary the new
-:mod:`src.core.agents.registry` policy gates use. Until the
-classifier is upgraded (post-demo), :func:`_derive_intent_flags`
-provides a deterministic mapping based on the existing
-:class:`RouteDecision` so the registry's gates can fire correctly.
-
-When the dispatcher is updated to call the upgraded classifier
-directly, this helper becomes a one-line passthrough.
+The classifier emits a coarse ``intent`` enum, not the granular
+``intent_flags`` vocabulary the registry uses. ``_derive_intent_flags``
+provides a deterministic mapping so the registry's policy gates
+fire correctly.
 """
 from __future__ import annotations
 
@@ -110,32 +92,15 @@ async def run(
     """Bridge :func:`run_pipeline` to the dispatcher's PanelEvent stream.
 
     Behaviour:
-
-    * Always emits a brief inline header so the user knows the planner
-      pipeline (rather than the static flow) is handling this turn.
-    * Forwards every ``_status`` event from the pipeline as an italic
-      chat line via :func:`src.core.artifacts.status`.
-    * If ``decision["wants_artifact"]`` is True, lazily opens a
-      LibreChat artifact on the synthesizer's first text emission so
-      the report lands in the side pane.
-    * Forwards ``error`` events unchanged so the dispatcher's existing
-      error rendering kicks in.
+    * Forwards every ``_status`` event as an italic chat progress line.
+    * Forwards all step-level events (content, tool calls, results)
+      so the user sees agent reasoning in real time.
+    * If ``decision["wants_artifact"]`` is True, wraps the synthesizer's
+      report in a LibreChat artifact.
     """
     intent_flags = _derive_intent_flags(decision or {})
     wants_artifact = bool((decision or {}).get("wants_artifact", False))
     topic = ((decision or {}).get("topic") or "").strip() or query.strip()[:60]
-
-    # Inline header so demo audiences see the planner-first slice
-    # explicitly. Keep it short — the pipeline's first _status event
-    # already says "Planning a multi-agent investigation for...".
-    yield {
-        "type": "text",
-        "text": (
-            "_Routing through the planner-first pipeline "
-            "(`/planner` opt-in)._\n\n"
-        ),
-        "persona": "orchestrator",
-    }
 
     try:
         tools = await mcp_servers.get_tools()

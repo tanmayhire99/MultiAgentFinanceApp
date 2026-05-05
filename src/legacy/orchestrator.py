@@ -24,15 +24,11 @@ except:
 from src.core.planner import PlannerAgent, Plan
 from src.core.router import RouterAgent
 
-# Import minimal agents for registry & resolution
-from src.agents.__all_minimal__ import (
-    Upstox,
-    DigitalTwin,
-    DeepWebResearch,
-    USStock,
-    IndianStock,
-    Advisor,
-)
+# Legacy agent references (now in src.core.agents.registry)
+# from src.agents.__all_minimal__ import (
+#     Upstox, DigitalTwin, DeepWebResearch,
+#     USStock, IndianStock, Advisor,
+# )
 
 
 def _resolve_agent(agent_key: str):

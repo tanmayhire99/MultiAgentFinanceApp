@@ -71,7 +71,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from src.agents.personas.base import build_chat_model
+from src.personas.base import build_chat_model
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.types import KNOWN_INTENT_FLAGS, Plan
 
@@ -186,6 +186,30 @@ Intent flags: wants_panel_debate=True.
 
 ```json
 {example_panel_stock}
+```
+
+### Example E — portfolio analysis (no panel)
+User query: "Analyse my portfolio"
+Intent flags: wants_portfolio_data=True.
+
+```json
+{example_portfolio_simple}
+```
+
+### Example F — topic / macro research
+User query: "What is driving the AI semiconductor rally?"
+Intent flags: all False.
+
+```json
+{example_topic_research}
+```
+
+### Example G — concept explanation (educational)
+User query: "Explain what DCF means and how to use it"
+Intent flags: all False.
+
+```json
+{example_educational}
 ```
 
 ## Output contract
@@ -328,6 +352,83 @@ _EXAMPLE_PANEL_STOCK = {
     ],
 }
 
+_EXAMPLE_PORTFOLIO_SIMPLE = {
+    "schema_version": "1.0",
+    "goal": "Pull portfolio holdings and summary, then write an analyst note for the user.",
+    "rationale": "Simple portfolio analysis (no panel debate) — portfolio_agent surfaces holdings and risks, synthesizer writes the note.",
+    "estimated_complexity": "moderate",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Pull the user's holdings, sector allocation, concentration risks, and diversification score.",
+            "agent": "portfolio_agent",
+            "tool_subset": [
+                "portfolio__get_holdings",
+                "portfolio__get_portfolio_summary",
+                "portfolio__get_sector_allocation",
+                "portfolio__get_concentration_risks",
+                "portfolio__get_diversification_score",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 5,
+        },
+        {
+            "id": 2,
+            "description": "Write a structured portfolio note for the user citing holdings and metrics from step 1.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [1],
+            "max_tool_calls": 0,
+        },
+    ],
+}
+
+_EXAMPLE_TOPIC_RESEARCH = {
+    "schema_version": "1.0",
+    "goal": "Research the AI semiconductor rally: web search and news for macro context.",
+    "rationale": "Open-ended topic research — research_agent does web/news search, synthesizer writes the report.",
+    "estimated_complexity": "moderate",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Search the web and recent news for information about the AI semiconductor rally.",
+            "agent": "research_agent",
+            "tool_subset": [
+                "research__search_web",
+                "research__search_news",
+                "research__get_company_brief",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 6,
+        },
+        {
+            "id": 2,
+            "description": "Write a structured report on the AI semiconductor rally citing the research from step 1.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [1],
+            "max_tool_calls": 0,
+        },
+    ],
+}
+
+_EXAMPLE_EDUCATIONAL = {
+    "schema_version": "1.0",
+    "goal": "Explain a finance concept (DCF) clearly in an educational voice.",
+    "rationale": "Pure concept explanation — synthesizer handles this with a single step, no tools needed.",
+    "estimated_complexity": "trivial",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Explain what DCF is and how to use it, in a clear educational style.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [],
+            "max_tool_calls": 0,
+        },
+    ],
+}
+
 _EXAMPLE_CLAIM_TRACKING = {
     "schema_version": "1.0",
     "goal": "Verify Tesla's FSD timeline claims against reality.",
@@ -407,6 +508,9 @@ def _build_system_prompt(
         example_claim_tracking=json.dumps(_EXAMPLE_CLAIM_TRACKING, indent=2),
         example_panel_portfolio=json.dumps(_EXAMPLE_PANEL_PORTFOLIO, indent=2),
         example_panel_stock=json.dumps(_EXAMPLE_PANEL_STOCK, indent=2),
+        example_portfolio_simple=json.dumps(_EXAMPLE_PORTFOLIO_SIMPLE, indent=2),
+        example_topic_research=json.dumps(_EXAMPLE_TOPIC_RESEARCH, indent=2),
+        example_educational=json.dumps(_EXAMPLE_EDUCATIONAL, indent=2),
     )
 
 

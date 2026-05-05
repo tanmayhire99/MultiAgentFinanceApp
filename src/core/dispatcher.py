@@ -12,23 +12,25 @@ Every user query goes through this single entry point, which:
      the env var is off)
 
 3. Initialises the MCP workers (cached; no-op after the first call).
-4. Dispatches to one of seven flows in :mod:`src.core.flows`:
+4. Dispatches ALL queries through the planner-first pipeline
+   :func:`src.core.flows.planner_pipeline.run` — every agent is a
+   standalone :class:`ScopedAgent` called only when the planner puts
+   its name in a plan step. Two fast-path exceptions:
 
-        portfolio_analysis   - full investor panel over the user's portfolio
-        stock_research       - focused deep dive on specific ticker(s)
-        deep_stock_research  - multi-step claim-tracking + SEC + historical news
-        topic_research       - web research on a macro / sector question
-        educational          - direct LLM explanation of a finance concept
-        meta_help            - curated capabilities answer (zero LLM calls)
-        smalltalk            - short conversational reply for greetings / thanks
+        smalltalk  — short conversational reply (zero LLM calls)
+        meta_help  — curated capabilities answer (zero LLM calls)
+
+   The legacy static flows in :mod:`src.core.flows` (stock_research,
+   portfolio_analysis, deep_stock_research, topic_research,
+   educational) are **deprecated** — they are monolithic scripts that
+   call tools imperatively instead of going through the planner. They
+   remain in the codebase for reference / rollback but are no longer
+   dispatched to.
 
 5. Emits a regulatory disclaimer footer **only** for flows that produced
    real financial analysis (portfolio / stock / deep / topic). Concept
    explanations, capability listings, and chitchat get no disclaimer -
    the intent is informational, not advisory.
-
-Keeping the orchestration logic in one module means only one place has
-to care about telemetry, error handling, or disclaimer wording.
 """
 from __future__ import annotations
 
@@ -36,7 +38,7 @@ import logging
 import os
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
-from src.agents.personas.base import register_tools
+from src.personas.base import register_tools
 from src.config import mcp_servers
 from src.core.flows import (
     deep_stock_research,
@@ -166,60 +168,39 @@ _ARTIFACT_PHRASES = _re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Planner-pipeline opt-in
+# Planner-pipeline — default router
 # ---------------------------------------------------------------------------
-# Stage 3 of the slice work ships the planner-first pipeline as an
-# **opt-in only** path. The user types ``/planner <query>`` to route
-# through :func:`src.core.flows.planner_pipeline.run`, which in turn
-# calls :func:`src.core.pipeline.run_pipeline`. The static flows
-# continue to handle every other turn unchanged. Auto-routing per
-# intent lands post-demo.
+# All non-trivial queries now route through the planner-first pipeline
+# :func:`src.core.flows.planner_pipeline.run`. The `/planner` prefix is
+# retained for backwards compatibility (treated as a no-op — it no longer
+# gates anything). The only fast-path intents that skip the planner are
+# ``smalltalk`` and ``meta_help`` (zero LLM calls).
 #
-# The detection itself is gated by ``FINAI_PLANNER_PREFIX`` so an
-# operator can disable the slash command at runtime (e.g. for a
-# customer-facing demo where the planner-first pipeline isn't
-# production-ready yet). Default is ON.
+# ``FINAI_USE_LEGACY_FLOWS=1`` can be set to revert to the old static-flow
+# dispatch (deprecated — for emergency rollback only).
 _PLANNER_PREFIXES = ("/planner ", "/planner\t")
 _PLANNER_BARE = "/planner"
 
 
-def _env_planner_prefix_enabled() -> bool:
-    """Whether ``/planner`` prefix detection is active.
-
-    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).
-    Default is ON when the env var is unset. Set
-    ``FINAI_PLANNER_PREFIX=0`` to suppress prefix recognition; queries
-    starting with ``/planner`` will then route through the normal
-    classifier instead of the planner pipeline.
-    """
-    raw = (os.getenv("FINAI_PLANNER_PREFIX") or "1").strip().lower()
+def _env_use_legacy_flows() -> bool:
+    """Emergency rollback switch. Set ``FINAI_USE_LEGACY_FLOWS=1`` to
+    revert to the old static-flow dispatch."""
+    raw = (os.getenv("FINAI_USE_LEGACY_FLOWS") or "").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
-def _strip_planner_prefix(query: str) -> Tuple[str, bool]:
-    """Detect a leading ``/planner`` prefix; strip it; return the flag.
-
-    Returns ``(stripped_query, force_planner)``. ``force_planner`` is
-    True iff the user prefixed their message with ``/planner ``
-    (case-insensitive). The bare ``/planner`` (no payload) just toggles
-    the flag and leaves an empty query — the classifier will treat
-    that as default and the planner pipeline will surface a useful
-    error.
-
-    Returns ``(query, False)`` unchanged if
-    :func:`_env_planner_prefix_enabled` is False — the prefix is then
-    treated as ordinary text and routes through the normal classifier.
-    """
-    if not _env_planner_prefix_enabled():
-        return query, False
+def _strip_planner_prefix(query: str) -> str:
+    """Strip the legacy ``/planner`` prefix (now a no-op — all queries
+    go through the planner pipeline by default). Retained so old
+    slash-command habits don't break anything."""
     q = query.lstrip()
     lower = q.lower()
     for prefix in _PLANNER_PREFIXES:
         if lower.startswith(prefix):
-            return q[len(prefix):].lstrip(), True
+            return q[len(prefix):].lstrip()
     if lower.rstrip() == _PLANNER_BARE:
-        return "", True
-    return query, False
+        return ""
+    return query
 
 
 def _strip_artifact_prefix(query: str) -> Tuple[str, bool]:
@@ -272,16 +253,15 @@ async def run_analysis(
     #    message. Each is one-shot:
     #      /trace    — toggles the developer routing card on for this
     #                   one request (independent of the env flag)
-    #      /planner  — routes this turn through the planner-first slice
-    #                   engine instead of the static flow (Stage 3
-    #                   opt-in; no auto-route table yet)
+    #      /planner  — legacy prefix, now a no-op; all queries route
+    #                   through the planner by default
     #      /artifact — opts INTO the LibreChat artifact pane (otherwise
     #                   everything streams inline in the chat,
     #                   Claude-style)
     #    Strip them before the classifier so it sees the real intent.
     query, force_trace = _strip_trace_prefix(query)
     verbose_trace = force_trace or _env_verbose_trace()
-    query, force_planner = _strip_planner_prefix(query)
+    query = _strip_planner_prefix(query)
     query, wants_artifact = _strip_artifact_prefix(query)
 
     # 1) Intent classification. If verbose_trace is on, we narrate the
@@ -364,22 +344,28 @@ async def run_analysis(
         yield {"type": "panel_done"}
         return
 
-    # 3) Dispatch to the selected flow. The /planner prefix is the
-    #    only way to reach the planner-first pipeline today (auto-
-    #    routing per intent is post-demo work). Otherwise, look up the
-    #    flow by classifier intent.
+    # 3) Dispatch. All intents route through the planner-first pipeline
+    #    by default. The only exceptions are smalltalk (greetings) and
+    #    meta_help (capabilities/help) — those are deterministic,
+    #    zero-LLM paths that don't need a plan.
+    #
+    #    FINAI_USE_LEGACY_FLOWS=1 reverts to the old static-flow dispatch
+    #    for emergency rollback only.
     intent = decision.get("intent", "educational")
-    if force_planner:
-        flow = planner_pipeline.run
-        log.info("dispatcher: /planner prefix → routing through planner_pipeline (intent=%s)", intent)
-    else:
+    use_legacy = _env_use_legacy_flows()
+
+    if use_legacy:
         flow = _FLOW_MAP.get(intent)
         if flow is None:
-            log.warning(
-                "Dispatcher received unknown intent %r; using educational",
-                intent,
-            )
+            log.warning("Legacy dispatcher: unknown intent %r; using educational", intent)
             flow = _FLOW_MAP["educational"]
+        log.info("dispatcher: legacy mode — routing intent=%s to static flow", intent)
+    elif intent in ("smalltalk", "meta_help"):
+        flow = _FLOW_MAP[intent]
+        log.info("dispatcher: fast-path intent=%s (no LLM needed)", intent)
+    else:
+        flow = planner_pipeline.run
+        log.info("dispatcher: routing intent=%s through planner-first pipeline", intent)
 
     # Per-tool narration events (`tool_call`, `tool_result`) and
     # ``header`` banner events are dev-facing trace. We strip them from

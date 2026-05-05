@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import build_chat_model
+from src.personas.base import build_chat_model
 
 
 log = logging.getLogger("finai.claims")

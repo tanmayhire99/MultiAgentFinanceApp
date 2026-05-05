@@ -8,7 +8,7 @@ Tools:
     - ``get_moat_signals``      -> qualitative moat statements + narrative
 
 Quantitative fields come from :mod:`yfinance` (1-hour cached in
-:mod:`src.agents.workers._live`). Qualitative / narrative fields (moat
+:mod:`src.mcp._live`). Qualitative / narrative fields (moat
 signals, disruption score, addressable market, analyst takes) stay with
 the curated fixture so the persona agents have a consistent story.
 
@@ -17,7 +17,7 @@ particular response was served live or from fallback.
 
 Run as a standalone MCP server over stdio::
 
-    python -m src.agents.workers.us_stock_mcp
+    python -m src.mcp.us_stock_mcp
 """
 from __future__ import annotations
 

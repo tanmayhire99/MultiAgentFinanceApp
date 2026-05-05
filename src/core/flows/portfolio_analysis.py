@@ -1,4 +1,9 @@
-"""Portfolio Analysis flow - two modes, gated on ``decision.want_panel``.
+"""Portfolio Analysis flow — two modes, gated on ``decision.want_panel``.
+
+.. deprecated::
+    This monolithic flow is superseded by the planner-first pipeline.
+    All queries now route through ``plan()`` → ``execute()`` → ``synthesize()``.
+    Retained for reference and emergency rollback (``FINAI_USE_LEGACY_FLOWS=1``).
 
 Picked by the dispatcher when the router classifies a query as
 ``portfolio_analysis`` (i.e. the user asked about their own holdings).
@@ -39,8 +44,8 @@ from typing import AsyncIterator, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import build_chat_model
-from src.agents.personas.moderator import moderator_open_stream
+from src.personas.base import build_chat_model
+from src.personas.moderator import moderator_open_stream
 from src.core.debate import PanelScratchpad, run_debate_loop
 from src.core.panel import (
     PanelEvent,

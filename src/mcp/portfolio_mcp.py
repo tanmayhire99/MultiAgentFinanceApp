@@ -17,7 +17,7 @@ concentration arithmetic inside an LLM:
 
 Run as a standalone MCP server over stdio::
 
-    python -m src.agents.workers.portfolio_mcp
+    python -m src.mcp.portfolio_mcp
 """
 from __future__ import annotations
 

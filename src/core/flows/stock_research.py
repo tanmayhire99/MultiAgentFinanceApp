@@ -1,4 +1,14 @@
-"""Stock Research flow - focused deep dive on 1-N specific tickers.
+"""Stock Research flow — focused deep dive on 1-N specific tickers.
+
+.. deprecated::
+    This monolithic flow has been superseded by the planner-first pipeline
+    (:mod:`src.core.flows.planner_pipeline`). All queries now route through
+    ``plan()`` → ``execute()`` → ``synthesize()`` where each agent
+    (``us_stock_agent``, ``research_agent``, ``synthesizer``) is a standalone
+    ``ScopedAgent`` called only when the planner puts its name in a plan step.
+
+    This module is retained for reference and emergency rollback
+    (``FINAI_USE_LEGACY_FLOWS=1``). It will be removed in a future release.
 
 Triggered when the router classifies a query as ``stock_research`` -
 i.e. the user asks about specific stock(s) rather than their own
@@ -37,8 +47,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import build_chat_model
-from src.agents.personas.moderator import moderator_open_stream
+from src.personas.base import build_chat_model
+from src.personas.moderator import moderator_open_stream
 from src.core.resilient_stream import stream_llm_resilient
 from src.core.panel import (
     PanelEvent,
@@ -82,7 +92,7 @@ _ANALYST_SYSTEM = (
 def _probe_us_fixture(ticker: str) -> bool:
     """Check if the ticker is in the curated US fixture (cheap, no network)."""
     try:
-        from src.agents.workers._fixtures import load_fixture, lookup
+        from src.mcp._fixtures import load_fixture, lookup
 
         _fx = load_fixture("us_stocks")
         try:
@@ -96,7 +106,7 @@ def _probe_us_fixture(ticker: str) -> bool:
 
 def _probe_indian_fixture(ticker: str) -> bool:
     try:
-        from src.agents.workers._fixtures import load_fixture, lookup
+        from src.mcp._fixtures import load_fixture, lookup
 
         _fx = load_fixture("indian_stocks")
         try:

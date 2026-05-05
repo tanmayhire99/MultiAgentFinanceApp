@@ -63,7 +63,7 @@ from typing import Callable, Dict, Optional, Sequence
 
 from langchain_core.tools import BaseTool
 
-from src.agents.personas.base import build_chat_model
+from src.personas.base import build_chat_model
 from src.core.agents._base import (
     DEFAULT_RECURSION_LIMIT,
     ScopedAgent,
@@ -238,7 +238,7 @@ def build_portfolio_agent(
     """ScopedAgent specialised for portfolio holdings + analytics.
 
     The Portfolio Agent's MCP tools return **deterministic Python
-    summaries** computed by :mod:`src.agents.workers.portfolio_mcp`:
+    summaries** computed by :mod:`src.mcp.portfolio_mcp`:
     the holdings list, sector allocation, concentration risks,
     diversification score. The LLM should call these and present
     them; it should NOT recompute or extrapolate, as the deterministic

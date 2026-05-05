@@ -37,15 +37,15 @@ from typing import Any, AsyncIterator, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.personas.base import (
+from src.personas.base import (
     PersonaDef,
     PersonaVerdict,
     build_persona_agent,
     parse_verdict,
 )
-from src.agents.personas.buffett import BUFFETT
-from src.agents.personas.graham import GRAHAM
-from src.agents.personas.wood import WOOD
+from src.personas.buffett import BUFFETT
+from src.personas.graham import GRAHAM
+from src.personas.wood import WOOD
 from src.config import mcp_servers
 
 
@@ -202,7 +202,7 @@ class PortfolioContext:
 
         Price column is rendered in USD. For Indian listings the Stock
         Agent has already converted from INR to USD via
-        :data:`src.agents.workers._live.USD_PER_INR`, so the values here
+        :data:`src.mcp._live.USD_PER_INR`, so the values here
         compare apples-to-apples across US and Indian holdings.
         """
         if not self.market_snapshot:

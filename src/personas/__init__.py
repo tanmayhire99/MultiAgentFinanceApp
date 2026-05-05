@@ -1,14 +1,14 @@
-"""Persona agents for the FinAI Investor Panel.
+"""Panel personas for the FinAI Investor Panel.
 
 Each persona is a LangGraph ReAct agent with:
 
 * a distinctive system prompt (voice + investment philosophy),
-* access to the same pool of MCP worker tools,
+* access to the same pool of MCP tools from :mod:`src.mcp`,
 * a structured output contract consumed by the panel supervisor.
 
-The shared factory in :mod:`src.agents.personas.base` keeps the model
+The shared factory in :mod:`src.personas.base` keeps the model
 configuration, output schema and graph construction identical across
-personas so the comparison between them is apples-to-apples.
+personas so comparisons are apples-to-apples.
 """
 from .base import PersonaVerdict, build_persona_agent  # noqa: F401
 from .buffett import buffett_agent  # noqa: F401

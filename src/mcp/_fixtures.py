@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-# Project root is two levels up from src/agents/workers/
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+# Project root is two levels up from src/mcp/
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _FIXTURE_DIR = _REPO_ROOT / "data" / "fixtures"
 
 

@@ -43,7 +43,7 @@ from typing import AsyncIterator, Optional, Tuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import build_chat_model
+from src.personas.base import build_chat_model
 from src.core.panel import PanelEvent
 from src.core.router import RouteDecision
 

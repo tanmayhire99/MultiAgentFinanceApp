@@ -21,12 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .agents.personas.base import (
+from .personas.base import (
     DEFAULT_MODEL,
     PERSONA_API_KEY_SLOT,
     list_configured_slots,
 )
-from .agents.workers._fixtures import load_fixture
+from .mcp._fixtures import load_fixture
 from .config import mcp_servers
 from .core.dispatcher import run_analysis
 from .core.router import INTENTS

@@ -38,28 +38,28 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 MCP_SERVERS: Dict[str, Dict[str, Any]] = {
     "portfolio": {
         "command": _PYTHON,
-        "args": ["-m", "src.agents.workers.portfolio_mcp"],
+        "args": ["-m", "src.mcp.portfolio_mcp"],
         "transport": "stdio",
         "cwd": _REPO_ROOT,
         "env": dict(os.environ),
     },
     "us_stock": {
         "command": _PYTHON,
-        "args": ["-m", "src.agents.workers.us_stock_mcp"],
+        "args": ["-m", "src.mcp.us_stock_mcp"],
         "transport": "stdio",
         "cwd": _REPO_ROOT,
         "env": dict(os.environ),
     },
     "indian_stock": {
         "command": _PYTHON,
-        "args": ["-m", "src.agents.workers.indian_stock_mcp"],
+        "args": ["-m", "src.mcp.indian_stock_mcp"],
         "transport": "stdio",
         "cwd": _REPO_ROOT,
         "env": dict(os.environ),
     },
     "research": {
         "command": _PYTHON,
-        "args": ["-m", "src.agents.workers.research_mcp"],
+        "args": ["-m", "src.mcp.research_mcp"],
         "transport": "stdio",
         "cwd": _REPO_ROOT,
         "env": dict(os.environ),

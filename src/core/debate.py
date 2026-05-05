@@ -36,7 +36,7 @@ from typing import AsyncIterator, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import (
+from src.personas.base import (
     PersonaDef,
     build_chat_model,
     parse_verdict,
@@ -297,7 +297,7 @@ def _compose_round_user_message(
 # ---------------------------------------------------------------------------
 # Rebuttal executor (plain streamed LLM call, no ReAct loop, no tools)
 # ---------------------------------------------------------------------------
-from src.agents.personas.base import PERSONA_API_KEY_SLOT
+from src.personas.base import PERSONA_API_KEY_SLOT
 
 
 async def _stream_rebuttal(

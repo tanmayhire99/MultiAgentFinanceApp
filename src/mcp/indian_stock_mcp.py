@@ -6,14 +6,14 @@ quantitative data comes from :mod:`yfinance` with the ``.NS`` suffix
 the ``indian_stocks`` fixture.
 
 If you want *real-time* NSE/BSE data (not yfinance's 15-min-delayed
-feed), swap :func:`src.agents.workers._live.fetch_and_map` for an
+feed), swap :func:`src.mcp._live.fetch_and_map` for an
 ``nsepython``- or ``bsedata``-backed equivalent inside this module;
 the tool signatures and response schemas are designed to be stable
 across that swap.
 
 Run as::
 
-    python -m src.agents.workers.indian_stock_mcp
+    python -m src.mcp.indian_stock_mcp
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def get_quote(ticker: str) -> Dict[str, Any]:
     """Return the latest quote for an NSE ticker.
 
     Returned in USD: the live ``yfinance`` path auto-converts from the
-    exchange's native INR (via :data:`src.agents.workers._live.USD_PER_INR`)
+    exchange's native INR (via :data:`src.mcp._live.USD_PER_INR`)
     and the fixture fallback is stored in USD too, so downstream
     consumers always see one currency.
     """

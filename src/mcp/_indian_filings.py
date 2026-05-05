@@ -1,6 +1,6 @@
 """Indian NSE/BSE filings + aggregator wrapper.
 
-The Indian counterpart to :mod:`src.agents.workers._sec_edgar`. Provides the
+The Indian counterpart to :mod:`src.mcp._sec_edgar`. Provides the
 deep-research agent with the raw materials for claim-tracking on NSE/BSE
 listed stocks:
 

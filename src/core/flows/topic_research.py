@@ -1,6 +1,10 @@
-"""Topic Research flow - open-ended web research on a theme or macro question.
+"""Topic Research flow — open-ended web research on a theme or macro question.
 
-Triggered by the router when the user asks *about* a topic that isn't
+.. deprecated::
+    Superseded by the planner-first pipeline. Retained for reference
+    and emergency rollback (``FINAI_USE_LEGACY_FLOWS=1``).
+
+Triggered by the router when the user asks about a topic that isn't
 tied to a specific ticker (e.g. "Impact of US-China tariffs on semis",
 "Trends in Indian IT services"). The flow:
 
@@ -21,7 +25,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.personas.base import build_chat_model
+from src.personas.base import build_chat_model
 from src.core.panel import PanelEvent, _call_tool
 from src.core.router import RouteDecision
 

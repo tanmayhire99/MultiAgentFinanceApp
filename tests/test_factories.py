@@ -26,7 +26,7 @@ Covers:
    and returns a complete :class:`StepResult`.
 
 The factories internally call ``build_chat_model`` from
-``src.agents.personas.base`` — that needs an NVIDIA API key. We
+``src.personas.base`` — that needs an NVIDIA API key. We
 mock it out so tests run in any environment. The panel agent's
 ``run`` likewise has every dependency mocked (``run_debate_loop``,
 the moderator-synthesis chat model, etc.) so no live LLM is

@@ -139,7 +139,7 @@ class PanelScopedAgent(ScopedAgent):
         """
         started_at = time.time()
         try:
-            from src.agents.personas.base import build_chat_model
+            from src.personas.base import build_chat_model
             from src.core.debate import (
                 PanelScratchpad,
                 run_debate_loop,
