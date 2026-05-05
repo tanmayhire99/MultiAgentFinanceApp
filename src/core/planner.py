@@ -228,7 +228,7 @@ _EXAMPLE_SIMPLE_STOCK = {
     "schema_version": "1.0",
     "goal": "Brief NVDA: live fundamentals + recent catalysts + a synthesised analyst note.",
     "rationale": "stock research with no panel and no claim tracking - one stock_agent step, one research_agent step, one synthesizer step.",
-    "estimated_complexity": "moderate",
+    "estimated_complexity": "medium",
     "steps": [
         {
             "id": 1,
@@ -269,7 +269,7 @@ _EXAMPLE_PANEL_PORTFOLIO = {
     "schema_version": "1.0",
     "goal": "Run a Buffett / Wood / Graham multi-round debate over the user's portfolio holdings, then synthesise a moderator closing brief.",
     "rationale": "Portfolio-level panel: portfolio_agent surfaces holdings + risks, panel_agent runs the multi-persona debate loop, synthesizer writes the final brief.",
-    "estimated_complexity": "heavy",
+    "estimated_complexity": "high",
     "steps": [
         {
             "id": 1,
@@ -308,7 +308,7 @@ _EXAMPLE_PANEL_STOCK = {
     "schema_version": "1.0",
     "goal": "Run a Buffett / Wood / Graham multi-round debate over NVDA fundamentals + recent catalysts, then synthesise a moderator closing brief.",
     "rationale": "Single-ticker panel: us_stock_agent pulls live fundamental data, research_agent gets catalysts, panel_agent runs the multi-persona debate loop, synthesizer writes the final brief.",
-    "estimated_complexity": "heavy",
+    "estimated_complexity": "high",
     "steps": [
         {
             "id": 1,
@@ -356,7 +356,7 @@ _EXAMPLE_PORTFOLIO_SIMPLE = {
     "schema_version": "1.0",
     "goal": "Pull portfolio holdings and summary, then write an analyst note for the user.",
     "rationale": "Simple portfolio analysis (no panel debate) — portfolio_agent surfaces holdings and risks, synthesizer writes the note.",
-    "estimated_complexity": "moderate",
+    "estimated_complexity": "medium",
     "steps": [
         {
             "id": 1,
@@ -387,7 +387,7 @@ _EXAMPLE_TOPIC_RESEARCH = {
     "schema_version": "1.0",
     "goal": "Research the AI semiconductor rally: web search and news for macro context.",
     "rationale": "Open-ended topic research — research_agent does web/news search, synthesizer writes the report.",
-    "estimated_complexity": "moderate",
+    "estimated_complexity": "medium",
     "steps": [
         {
             "id": 1,
@@ -433,7 +433,7 @@ _EXAMPLE_CLAIM_TRACKING = {
     "schema_version": "1.0",
     "goal": "Verify Tesla's FSD timeline claims against reality.",
     "rationale": "Claim tracking on Tesla - need SEC filings (forward claims) + historical news (reality check) + claim_agent for extraction and comparison.",
-    "estimated_complexity": "heavy",
+    "estimated_complexity": "high",
     "steps": [
         {
             "id": 1,
