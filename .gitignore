@@ -21,3 +21,4 @@ FinanceApp.tar.gz
 
 # Runtime response-cache (demo safety net, regenerated per deployment)
 data/response_cache/*.json
+/test.py

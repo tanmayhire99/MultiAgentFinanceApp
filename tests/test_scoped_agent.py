@@ -543,7 +543,14 @@ class RunIntegrationTests(unittest.TestCase):
     """
 
     def _run(self, agent: ScopedAgent) -> StepResult:
-        return asyncio.run(agent.run())
+        # Consume the async generator to get the final result
+        async def _collect_result():
+            async for event in agent.run():
+                if event.get("type") == "_step_result":
+                    return event.get("result")
+            return None
+            
+        return asyncio.run(_collect_result())
 
     def test_run_returns_complete_step_result(self):
         sa = ScopedAgent(

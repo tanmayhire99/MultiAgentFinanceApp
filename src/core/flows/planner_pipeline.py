@@ -159,10 +159,40 @@ async def run(
         etype = ev.get("type")
 
         if etype == "_status":
-            # Live progress lines. Always shown (per user pref) and
-            # always emitted OUTSIDE the artifact - they precede the
-            # synthesizer's text and shouldn't pollute the side pane.
             yield status(ev.get("text", ""))
+            continue
+
+        if etype == "step_content":
+            text = ev.get("text", "")
+            if text:
+                yield {"type": "text", "text": text, "persona": ev.get("persona", "agent")}
+            continue
+
+        if etype == "step_tool_call":
+            tool_name = ev.get("tool", "?")
+            args = ev.get("args", {})
+            args_str = ""
+            if args:
+                try:
+                    import json
+                    args_str = " " + json.dumps(args, default=str)[:60]
+                except Exception:
+                    pass
+            yield {
+                "type": "text",
+                "text": f"_Calling {tool_name}…{args_str}_\n\n",
+                "persona": ev.get("persona", "agent"),
+            }
+            continue
+
+        if etype == "step_tool_result":
+            tool_name = ev.get("tool", "?")
+            preview = ev.get("result_preview", "")
+            yield {
+                "type": "text",
+                "text": f"_→ {tool_name}: {preview}_\n\n",
+                "persona": ev.get("persona", "agent"),
+            }
             continue
 
         if etype == "text" and ev.get("persona") == "synthesizer":
@@ -176,6 +206,13 @@ async def run(
                 )
                 artifact_open = True
             yield {"type": "text", "text": text, "persona": "synthesizer"}
+            continue
+
+        # Debate events (header, text from personas, tool_call,
+        # tool_result, persona_verdict, etc.) pass through as-is.
+        if etype in ("header", "tool_call", "tool_result",
+                     "persona_verdict", "panel_done"):
+            yield ev
             continue
 
         # error / other → forward as-is

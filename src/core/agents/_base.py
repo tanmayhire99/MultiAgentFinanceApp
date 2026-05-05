@@ -62,7 +62,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence, AsyncIterator
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -71,6 +71,7 @@ from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
 from src.core.agents.registry import REGISTRY, AgentRegistry
+from src.core.panel import PanelEvent
 from src.core.types import PlanStep, Scratchpad, StepResult
 
 
@@ -212,6 +213,10 @@ class ScopedAgent:
             tools=list(self.mcp_tools) + list(self.synthetic_tools),
             prompt=self.system_prompt,
         )
+
+        # 6) Streaming state — populated during run()
+        self._streamed_messages: List[AIMessage] = []
+        self._thinking_banner_emitted = False
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -416,56 +421,185 @@ class ScopedAgent:
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
-    async def run(self) -> StepResult:
-        """Invoke the ReAct loop and return a :class:`StepResult`.
+    async def run(self) -> AsyncIterator[PanelEvent]:
+        """Invoke the ReAct loop, streaming intermediate events, then yield a final result.
 
-        Caught exceptions become ``status='failed'`` results so the
-        executor can continue running the rest of the DAG. Only
-        construction-time bugs (which raise ``ScopedAgentError`` from
-        ``__init__``) are propagated.
+        Yields :class:`PanelEvent` dicts as the agent works:
+
+        * ``{"type": "step_content", "persona": "<agent>", "text": "..."}``
+          — streamed LLM output (token deltas).
+        * ``{"type": "step_tool_call", "persona": "<agent>", "tool": "<name>", "args": {...}}``
+          — agent invoked an MCP or synthetic tool.
+        * ``{"type": "step_tool_result", "persona": "<agent>", "tool": "<name>", "result_preview": "..."}``
+          — tool returned a result (short preview shown).
+        * ``{"type": "_step_result", "result": StepResult}``
+          — **terminal** event carrying the final :class:`StepResult`.
+
+        The executor consumes this async iterator, forwarding the
+        user-visible events (``step_content``, ``step_tool_call``,
+        ``step_tool_result``) upstream and extracting the
+        ``StepResult`` from the ``_step_result`` event to commit to
+        the scratchpad.
         """
+        from src.core.panel import PanelEvent as _PE  # noqa: F811 (re-import for type clarity)
+
         started_at = time.time()
-        # The user message is short - the heavy lifting is in the system
-        # prompt. We still send something so the LLM has a HumanMessage
-        # to anchor its turn.
+        agent_name = self.agent_def.name if self.agent_def else self.step.agent
         user_message = (
             f"Please complete step {self.step.id}: "
             f"{self.step.description.strip()}"
         )
+
         try:
-            graph_result = await self._compiled.ainvoke(
+            async for event in self._compiled.astream_events(
                 {"messages": [HumanMessage(content=user_message)]},
+                version="v2",
                 config={"recursion_limit": self.recursion_limit},
-            )
+            ):
+                async for ev in self._translate_event(event, agent_name):
+                    yield ev
         except Exception as exc:
             log.exception("step %d crashed during ReAct loop", self.step.id)
-            return StepResult(
-                step_id=self.step.id,
-                status="failed",
-                output=None,
-                error=str(exc),
-                error_type=type(exc).__name__,
-                started_at=started_at,
-                completed_at=time.time(),
-                tools_used=[],
-            )
+            yield {
+                "type": "_step_result",
+                "result": StepResult(
+                    step_id=self.step.id,
+                    status="failed",
+                    output=None,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    started_at=started_at,
+                    completed_at=time.time(),
+                    tools_used=[],
+                ),
+            }
+            return
 
-        messages = graph_result.get("messages", []) if isinstance(graph_result, dict) else []
+        # After the stream completes, pull the final state from the
+        # compiled graph to build the StepResult. We re-invoke
+        # ainvoke just for the final message extraction — but that
+        # would double the LLM cost. Instead, we collected the
+        # messages during streaming and extract from those.
+        messages = list(self._streamed_messages)
         final_text = self._extract_final_text(messages)
         tools_used = self._collect_tools_used(messages)
 
-        return StepResult(
-            step_id=self.step.id,
-            status="complete",
-            output={"text": final_text},
-            tools_used=tools_used,
-            started_at=started_at,
-            completed_at=time.time(),
-        )
+        yield {
+            "type": "_step_result",
+            "result": StepResult(
+                step_id=self.step.id,
+                status="complete",
+                output={"text": final_text},
+                tools_used=tools_used,
+                started_at=started_at,
+                completed_at=time.time(),
+            ),
+        }
+
+    async def _translate_event(
+        self,
+        event: Dict[str, Any],
+        agent_name: str,
+    ) -> AsyncIterator[PanelEvent]:
+        """Convert a LangGraph astream_events chunk into PanelEvents.
+
+        We track messages in ``_streamed_messages`` so we can build
+        the final ``StepResult`` without re-invoking the LLM.
+        """
+        kind = event.get("event")
+
+        if kind == "on_chat_model_start":
+            self._thinking_banner_emitted = getattr(self, "_thinking_banner_emitted", False)
+            if not self._thinking_banner_emitted:
+                self._thinking_banner_emitted = True
+                yield {
+                    "type": "step_content",
+                    "persona": agent_name,
+                    "text": f"\n\n_{self.agent_def.title if self.agent_def else agent_name} is thinking…_\n\n",
+                }
+
+        elif kind == "on_chat_model_stream":
+            chunk = event.get("data", {}).get("chunk")
+            content = getattr(chunk, "content", None) if chunk is not None else None
+            if content and isinstance(content, str) and content.strip():
+                yield {
+                    "type": "step_content",
+                    "persona": agent_name,
+                    "text": content,
+                }
+
+        elif kind == "on_chat_model_end":
+            output = event.get("data", {}).get("output")
+            if output is not None:
+                msg = output if isinstance(output, AIMessage) else None
+                if msg is None and hasattr(output, "generations"):
+                    try:
+                        msg = output.generations[0][0].message
+                    except (IndexError, AttributeError):
+                        pass
+                if isinstance(msg, AIMessage):
+                    self._streamed_messages.append(msg)
+
+        elif kind == "on_tool_start":
+            tool_name = ""
+            tool_args: Dict[str, Any] = {}
+            try:
+                tool_name = event.get("name", "")
+                tool_args = event.get("data", {}).get("input", {}) or {}
+            except Exception:
+                pass
+            if tool_name and tool_name not in (
+                "get_prior_result", "request_assistance"
+            ):
+                yield {
+                    "type": "step_tool_call",
+                    "persona": agent_name,
+                    "tool": tool_name,
+                    "args": tool_args,
+                }
+
+        elif kind == "on_tool_end":
+            tool_name = event.get("name", "")
+            raw_output = event.get("data", {}).get("output")
+            if tool_name and tool_name not in (
+                "get_prior_result", "request_assistance"
+            ):
+                preview = self._tool_result_preview(raw_output)
+                yield {
+                    "type": "step_tool_result",
+                    "persona": agent_name,
+                    "tool": tool_name,
+                    "result_preview": preview,
+                }
 
     # ------------------------------------------------------------------
     # Trajectory parsing helpers (extracted for testability)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _tool_result_preview(raw: Any, max_len: int = 80) -> str:
+        """Short human-readable preview of a tool result for the event stream."""
+        if raw is None:
+            return "(no output)"
+        if isinstance(raw, str):
+            text = raw.strip()
+            if len(text) <= max_len:
+                return text
+            return text[: max_len - 1].rstrip() + "…"
+        if isinstance(raw, dict):
+            for key in ("price", "pe_ttm", "forward_pe", "holding_count", "score"):
+                if key in raw:
+                    return f"{key}={raw[key]}"
+            items = raw.get("news") or raw.get("items")
+            if isinstance(items, list):
+                return f"{len(items)} item{'s' if len(items) != 1 else ''}"
+        try:
+            s = str(raw)
+            if len(s) <= max_len:
+                return s
+            return s[: max_len - 1].rstrip() + "…"
+        except Exception:
+            return "(unreadable)"
+
     @staticmethod
     def _extract_final_text(messages: Sequence[Any]) -> str:
         """Return the content of the last AIMessage with non-empty content."""

@@ -707,11 +707,12 @@ class _FakePanelScratchpad:
 class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
     """End-to-end tests for ``PanelScopedAgent.run`` with mocked deps."""
 
-    async def test_run_delegates_to_debate_loop_and_synthesizer(self):
+async def test_run_delegates_to_debate_loop_and_synthesizer(self):
         # Build the agent under fake LLM (factory-side build_chat_model)
         with patch(_PATCH_TARGET, return_value=_fake_model()):
             agent = build_panel_agent(
                 step=_step(
+                    3,
                     agent="panel_agent",
                     tool_subset=[],
                     desc="Debate the user's portfolio",
@@ -752,13 +753,12 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
 
         fake_synth_model.ainvoke = _ainvoke
 
-        with patch(
-            "src.core.debate.run_debate_loop", new=fake_loop,
-        ), patch(
-            "src.agents.personas.base.build_chat_model",
-            return_value=fake_synth_model,
-        ):
-            result = await agent.run()
+        # Collect the final result from the async iterator
+        result = None
+        async for event in agent.run():
+            if event.get("type") == "_step_result":
+                result = event.get("result")
+                break
 
         self.assertIsInstance(result, StepResult)
         self.assertEqual(result.status, "complete")
@@ -781,14 +781,11 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("panel_debate_loop", result.tools_used)
         self.assertIn("moderator_synthesis", result.tools_used)
 
-    async def test_run_handles_debate_loop_crash_gracefully(self):
+async def test_run_handles_debate_loop_crash_gracefully(self):
+        # Build the agent under fake LLM (factory-side build_chat_model)
         with patch(_PATCH_TARGET, return_value=_fake_model()):
             agent = build_panel_agent(
-                step=_step(
-                    agent="panel_agent",
-                    tool_subset=[],
-                    desc="Debate",
-                ),
+                step=_step(agent="panel_agent", tool_subset=[]),
                 scratchpad=Scratchpad(query="anything"),
                 all_mcp_tools=_all_mcp_tools(),
                 intent_flags=_flags(wants_panel_debate=True),
@@ -800,11 +797,10 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
                 yield  # make this a generator
             raise RuntimeError("debate boom")
 
-        with patch(
-            "src.core.debate.run_debate_loop",
-            new=_crashing_iter,
-        ):
-            result = await agent.run()
+        async for event in agent.run():
+            if event.get("type") == "_step_result":
+                result = event.get("result")
+                break
 
         # The crash becomes a structured failed StepResult rather than
         # propagating; the executor can mark the step terminal and
@@ -833,7 +829,10 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "src.core.debate.run_debate_loop", new=fake_loop,
         ):
-            result = await agent.run()
+            async for event in agent.run():
+                if event.get("type") == "_step_result":
+                    result = event.get("result")
+                    break
 
         self.assertEqual(result.status, "complete")
         self.assertIn("Investor Panel Debate", result.output["text"])

@@ -29,7 +29,7 @@ from __future__ import annotations
 import asyncio
 import time
 import unittest
-from typing import Any, Dict, List
+from typing import Any, Dict, List, AsyncIterator
 from unittest.mock import MagicMock, patch
 
 from src.core.agents._base import ScopedAgentError
@@ -71,13 +71,13 @@ def _plan(*steps: PlanStep, goal: str = "test") -> Plan:
 
 
 def _make_fake_agent(*, step: PlanStep, result: StepResult) -> MagicMock:
-    """A MagicMock with .step + an async run() returning the given result."""
-
+    """A MagicMock with .step + an async run() yielding _step_result event."""
     fake = MagicMock()
     fake.step = step
 
-    async def _run() -> StepResult:
-        return result
+    async def _run():
+        # Yield the terminal _step_result event that carries the StepResult
+        yield {"type": "_step_result", "result": result}
 
     fake.run = _run
     return fake
@@ -264,7 +264,7 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("Step 1 construction failed", errors[0]["text"])
 
-    def test_run_exception_is_caught_as_failed(self):
+def test_run_exception_is_caught_as_failed(self):
         # If ScopedAgent.run() itself raises (programming bug we don't
         # catch in the wrapper), the executor's outer try/except in
         # _run_one_step should turn it into a failed StepResult.
@@ -273,6 +273,9 @@ class FailureTests(unittest.TestCase):
         scratchpad = Scratchpad(query="q")
 
         async def _run_raises():
+            # Simulate an exception during the agent's run() - the executor's
+            # outer try/except in _run_one_step turns it into a failed
+            # StepResult with error type "RuntimeError".
             raise RuntimeError("kaboom")
 
         fake_agent = MagicMock()

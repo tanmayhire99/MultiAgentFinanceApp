@@ -190,20 +190,22 @@ async def _run_one_step(
     registry: AgentRegistry,
     recursion_limit: int,
 ) -> AsyncIterator[PanelEvent]:
-    """Build the step's ScopedAgent, run it, commit the result.
+    """Build the step's ScopedAgent, run it (streaming), commit the result.
 
     Yields ``_status`` events for the step's start / end (so the
-    pipeline can render them in the chat) and ``error`` events for
-    construction failures. The step's actual ReAct trajectory is
-    NOT yielded by this function in v0 - just the summary of the
-    final StepResult.
+    pipeline can render them in the chat), ``error`` events for
+    construction failures, and forwards all intermediate events
+    (``step_content``, ``step_tool_call``, ``step_tool_result``)
+    from the agent's streaming ``run()`` method so the user sees
+    live progress per step.
+
+    The agent's terminal ``_step_result`` event is consumed here
+    (not yielded) — its ``StepResult`` is committed to the
+    scratchpad and a summary status line is emitted instead.
     """
     desc_short = step.description.strip().split("\n", 1)[0][:80]
     yield _status(f"Step {step.id}: {step.agent} — {desc_short}...")
 
-    # Build the ScopedAgent. ScopedAgentError is the only construction
-    # failure mode we expect (registry / policy-gate / tool-owner
-    # violations). Anything else propagates.
     try:
         agent = build_scoped_agent_for_step(
             step=step,
@@ -226,11 +228,29 @@ async def _run_one_step(
         ))
         return
 
-    # Run the ScopedAgent. Its run() catches ReAct-loop exceptions
-    # internally and returns a failed StepResult — so a raise here
-    # would be a programming error, not a tool failure.
+    # The agent's run() is now an AsyncIterator yielding
+    # PanelEvents, with a terminal _step_result event.
+    result: Optional[StepResult] = None
     try:
-        result = await agent.run()
+        async for ev in agent.run():
+            etype = ev.get("type")
+
+            if etype == "_step_result":
+                result = ev.get("result")
+                continue
+
+            # Forward step-level content events upstream so the
+            # pipeline / planner_pipeline can render them in the
+            # chat as they arrive.
+            if etype in ("step_content", "step_tool_call", "step_tool_result"):
+                yield ev
+                continue
+
+            # Other events (e.g. from PanelScopedAgent forwarding
+            # debate events like "header", "text", "tool_call",
+            # "tool_result", "persona_verdict") pass through as-is.
+            if etype not in ("_status", "error"):
+                yield ev
     except Exception as e:
         log.exception("Unexpected exception running step %d", step.id)
         result = StepResult(
@@ -239,6 +259,19 @@ async def _run_one_step(
             output=None,
             error=str(e),
             error_type=type(e).__name__,
+            started_at=time.time(),
+            completed_at=time.time(),
+        )
+
+    if result is None:
+        # Agent didn't yield _step_result — treat as failed
+        log.error("Step %d agent.run() completed without _step_result", step.id)
+        result = StepResult(
+            step_id=step.id,
+            status="failed",
+            output=None,
+            error="agent.run() did not yield _step_result",
+            error_type="ExecutorError",
             started_at=time.time(),
             completed_at=time.time(),
         )

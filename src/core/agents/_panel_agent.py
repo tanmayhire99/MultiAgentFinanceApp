@@ -78,11 +78,12 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.core.agents._base import ScopedAgent
+from src.core.panel import PanelEvent
 from src.core.types import StepResult
 
 
@@ -123,17 +124,20 @@ class PanelScopedAgent(ScopedAgent):
     overridden.
     """
 
-    async def run(self) -> StepResult:  # type: ignore[override]
-        """Run the debate and return a single user-visible StepResult.
+    async def run(self) -> AsyncIterator[PanelEvent]:  # type: ignore[override]
+        """Run the debate, streaming events, then yield a terminal _step_result.
+
+        Yields ``PanelEvent`` dicts from the debate loop (``header``,
+        ``text``, ``tool_call``, ``tool_result``, etc.) in real time,
+        then a terminal ``_step_result`` event carrying the
+        :class:`StepResult` — matching the base class's streaming
+        contract.
 
         Catches every exception inside the orchestration so that a
         crashed persona / failed LLM call surfaces as a ``failed``
         StepResult — never propagates to the executor.
         """
         started_at = time.time()
-        # Imports are local to keep the agents module's import graph
-        # cheap (the executor / planner / pipeline don't need to pull
-        # debate.py into every test run that touches a ScopedAgent).
         try:
             from src.agents.personas.base import build_chat_model
             from src.core.debate import (
@@ -141,17 +145,22 @@ class PanelScopedAgent(ScopedAgent):
                 run_debate_loop,
             )
             from src.core.panel import PortfolioContext
-        except Exception as exc:  # pragma: no cover - import-time only
+        except Exception as exc: # pragma: no cover - import-time only
             log.exception("panel agent: failed to import debate machinery")
-            return StepResult(
-                step_id=self.step.id,
-                status="failed",
-                output=None,
-                error=f"panel agent boot error: {exc}",
-                error_type=type(exc).__name__,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
+            yield {
+                "type": "_step_result",
+                "result": StepResult(
+                    step_id=self.step.id,
+                    status="failed",
+                    output=None,
+                    error=f"panel agent boot error: {exc}",
+                    error_type=type(exc).__name__,
+                    started_at=started_at,
+                    completed_at=time.time(),
+                    tools_used=[],
+                ),
+            }
+            return
 
         try:
             ctx = self._build_portfolio_context(PortfolioContext)
@@ -163,23 +172,54 @@ class PanelScopedAgent(ScopedAgent):
             ctx = None
 
         query = self._panel_query()
+
+        # Run the debate, forwarding events in real time
+        transcript_lines: List[str] = []
+        final_scratchpad = None
+
         try:
-            transcript_md, scratchpad = await self._run_debate(
-                query=query,
+            async for ev in run_debate_loop(
+                query,
                 portfolio_ctx=ctx,
-                run_debate_loop=run_debate_loop,
-            )
+                user_id="demo",
+                flow_name="planner_panel",
+            ):
+                ev_type = ev.get("type") if isinstance(ev, dict) else None
+                if ev_type == "_debate_done":
+                    final_scratchpad = ev.get("scratchpad")
+                    continue
+                if ev_type in ("header", "text"):
+                    text = ev.get("text") if isinstance(ev, dict) else None
+                    if isinstance(text, str) and text:
+                        transcript_lines.append(text)
+                # Forward ALL debate events to the pipeline (including
+                # tool_call, tool_result, persona_verdict, etc.)
+                yield ev
         except Exception as exc:
             log.exception("panel agent: debate loop crashed")
-            return StepResult(
-                step_id=self.step.id,
-                status="failed",
-                output=None,
-                error=f"debate loop failed: {exc}",
-                error_type=type(exc).__name__,
-                started_at=started_at,
-                completed_at=time.time(),
-            )
+            yield {
+                "type": "_step_result",
+                "result": StepResult(
+                    step_id=self.step.id,
+                    status="failed",
+                    output=None,
+                    error=f"debate loop failed: {exc}",
+                    error_type=type(exc).__name__,
+                    started_at=started_at,
+                    completed_at=time.time(),
+                    tools_used=[],
+                ),
+            }
+            return
+
+        scratchpad = final_scratchpad
+        transcript_md = "".join(transcript_lines).strip()
+
+        # The conversation content is already streamed during the debate,
+        # so we don't need to emit the full transcript again here.
+        # This avoids duplication while keeping the streamed content visible.
+        if transcript_md:
+            pass  # No duplicate transcript yield - content already streamed
 
         try:
             closing_brief = await self._write_closing_brief(
@@ -190,13 +230,17 @@ class PanelScopedAgent(ScopedAgent):
             )
         except Exception as exc:
             log.exception("panel agent: closing-brief synthesis crashed")
-            # Soft-fail: we still have the transcript, so return a
-            # complete-but-incomplete result. The pipeline's
-            # synthesizer step can decide how to surface this.
             closing_brief = (
                 f"_(closing brief unavailable: {exc}; the debate "
                 "transcript above is the full panel output.)_"
             )
+
+        # Emit closing brief as a streamed text event too
+        yield {
+            "type": "text",
+            "text": "\n\n## Panel Conversation Summary\n\n" + closing_brief + "\n",
+            "persona": "moderator",
+        }
 
         full_text = self._render_full_text(
             transcript_md=transcript_md,
@@ -209,21 +253,24 @@ class PanelScopedAgent(ScopedAgent):
             scratchpad.stance_evolution_md() if scratchpad is not None else ""
         )
 
-        return StepResult(
-            step_id=self.step.id,
-            status="complete",
-            output={
-                "text": full_text,
-                "verdicts": verdicts,
-                "consensus_round": consensus_round,
-                "stance_evolution_md": evolution_md,
-                "rounds": len({e.round for e in scratchpad.entries})
-                if scratchpad is not None else 0,
-            },
-            tools_used=["panel_debate_loop", "moderator_synthesis"],
-            started_at=started_at,
-            completed_at=time.time(),
-        )
+        yield {
+            "type": "_step_result",
+            "result": StepResult(
+                step_id=self.step.id,
+                status="complete",
+                output={
+                    "text": full_text,
+                    "verdicts": verdicts,
+                    "consensus_round": consensus_round,
+                    "stance_evolution_md": evolution_md,
+                    "rounds": len({e.round for e in scratchpad.entries})
+                    if scratchpad is not None else 0,
+                },
+                tools_used=["panel_debate_loop", "moderator_synthesis"],
+                started_at=started_at,
+                completed_at=time.time(),
+            ),
+        }
 
     # ------------------------------------------------------------------
     # Helpers
@@ -326,41 +373,6 @@ class PanelScopedAgent(ScopedAgent):
             return None
         return ctx
 
-    async def _run_debate(
-        self,
-        *,
-        query: str,
-        portfolio_ctx: Optional[Any],
-        run_debate_loop: Any,
-    ) -> tuple[str, Any]:
-        """Drain the debate AsyncIterator into a transcript + scratchpad.
-
-        The transcript markdown is built up from the renderable events
-        (``header`` and ``text`` types); other event types
-        (``persona_verdict``, ``error``, etc.) are observed but not
-        rendered into the transcript — the synthesizer step picks up
-        verdict structure from the returned scratchpad instead.
-        """
-        transcript_lines: List[str] = []
-        final_scratchpad = None
-
-        async for ev in run_debate_loop(
-            query,
-            portfolio_ctx=portfolio_ctx,
-            user_id="demo",
-            flow_name="planner_panel",
-        ):
-            ev_type = ev.get("type") if isinstance(ev, dict) else None
-            if ev_type == "_debate_done":
-                final_scratchpad = ev.get("scratchpad")
-                continue
-            if ev_type in ("header", "text"):
-                text = ev.get("text") if isinstance(ev, dict) else None
-                if isinstance(text, str) and text:
-                    transcript_lines.append(text)
-
-        return "".join(transcript_lines).strip(), final_scratchpad
-
     async def _write_closing_brief(
         self,
         *,
@@ -462,14 +474,9 @@ class PanelScopedAgent(ScopedAgent):
         Sections match the static-flow path so the synthesizer step
         receives content the user is already familiar with.
         """
-        parts: List[str] = ["## Investor Panel Debate", ""]
-        if transcript_md:
-            parts.append(transcript_md)
-        else:
-            parts.append("_(no debate transcript was produced)_")
-        parts.append("")
-        parts.append("## Closing Brief")
-        parts.append("")
+        # The conversation content is already streamed during execution,
+        # so we only include the closing brief in the final output
+        parts: List[str] = ["## Panel Conversation Summary", ""]
         parts.append(closing_brief or "_(no closing brief was produced)_")
         return "\n".join(parts).strip() + "\n"
 
