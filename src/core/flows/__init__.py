@@ -1,51 +1,25 @@
-"""Per-intent flow modules dispatched by :mod:`src.core.dispatcher`.
+"""Flow modules dispatched by :mod:`src.core.dispatcher`.
 
-Each flow is an async generator yielding :class:`src.core.panel.PanelEvent`
-dicts. Flows share the supporting machinery (tool calling, persona
-streaming, etc.) defined in :mod:`src.core.panel`, but decide on their
-own which agents to invoke and what the final report should look like.
+All non-trivial queries route through ``planner_pipeline.run``
+(:mod:`src.core.flows.planner_pipeline`), which calls
+:func:`src.core.pipeline.run_pipeline` to orchestrate a planner-
+generated DAG of standalone :class:`~src.core.agents._base.ScopedAgent`
+instances.
 
-Flows exposed here:
+Two fast-path intents skip the planner entirely because they need
+zero LLM calls:
 
-* ``portfolio_analysis.run``    -- full investor panel over the user's portfolio
-* ``stock_research.run``        -- focused deep dive on 1-N tickers
-* ``deep_stock_research.run``   -- batch-mode multi-step deep agent with
-                                   claim-tracking (SEC filings + historical
-                                   news + forward-claim extraction + diff)
-* ``topic_research.run``        -- open-ended web research on a theme/macro
-* ``educational.run``           -- concept explanation; no agents, no tools
-* ``meta_help.run``             -- curated FinAI capabilities answer; zero
-                                   LLM calls (static markdown only)
-* ``smalltalk.run``             -- short conversational reply for greetings,
-                                   thanks, acknowledgments; hybrid
-                                   regex-static + LLM fallback
-* ``planner_pipeline.run``      -- bridges to the planner-first slice
-                                   engine (Day 6-7); reachable via the
-                                   ``/planner`` opt-in prefix only
-
-All expose a coroutine with the signature
-``run(query: str, decision: RouteDecision, user_id: str = "demo")``
-and yield events compatible with the SSE renderer in
-:mod:`src.core.streaming`.
+* ``smalltalk.run``  — short conversational reply for greetings
+* ``meta_help.run``  — curated capabilities answer in markdown
 """
 from . import (
-    deep_stock_research,
-    educational,
     meta_help,
     planner_pipeline,
-    portfolio_analysis,
     smalltalk,
-    stock_research,
-    topic_research,
 )
 
 __all__ = [
-    "deep_stock_research",
-    "educational",
     "meta_help",
     "planner_pipeline",
-    "portfolio_analysis",
     "smalltalk",
-    "stock_research",
-    "topic_research",
 ]

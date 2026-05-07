@@ -85,10 +85,10 @@ app = FastAPI(
         "Multi-agent finance demo. Exposes an OpenAI-compatible "
         "chat-completions endpoint used by LibreChat. Every request is "
         "first classified by an intent router (GPT-OSS-120B) and then "
-        "dispatched to one of four flows: portfolio_analysis (full "
-        "Buffett/Wood/Graham panel), stock_research (focused deep dive), "
-        "topic_research (open-ended web search), or educational (concept "
-        "explanation). MCP workers back the flows that need data."
+        "routed through a planner-first multi-agent pipeline — the "
+        "planner generates a DAG of standalone agent steps, executed "
+        "with debate and synthesis. MCP workers back the agents that "
+        "need live data."
     ),
     version="3.0.0",
     docs_url="/docs",
@@ -226,19 +226,19 @@ async def root():
         "service": "FinAI Multi-Agent Router",
         "version": "3.0.0",
         "description": (
-            "Intent router + four flows (portfolio_analysis, stock_research, "
-            "topic_research, educational). Every request is classified by a "
-            "small LLM call before the right agents are invoked."
+            "Intent router + planner-first multi-agent pipeline. "
+            "Every request is classified by a small LLM call, "
+            "then the planner orchestrates a DAG of standalone agents "
+            "(research, portfolio, filings, panel, synthesizer). "
+            "fast-path intents (smalltalk, meta_help) skip the planner."
         ),
         "router": {
             "intents": list(INTENTS),
             "classifier_model": DEFAULT_MODEL,
         },
-        "flows": {
-            "portfolio_analysis": "Full Buffett/Wood/Graham panel on the user's portfolio",
-            "stock_research": "Focused deep dive on specific ticker(s); optional panel via want_panel",
-            "topic_research": "Open-ended web research via the Research Agent",
-            "educational": "Direct LLM explanation; no agents, no tools",
+        "pipeline": {
+            "intents": list(INTENTS),
+            "description": "All intents route through planner-first pipeline; smalltalk/meta_help are zero-LLM fast paths",
         },
         "personas": ["buffett", "wood", "graham"],
         "mcp_workers": list(mcp_servers.MCP_SERVERS.keys()),

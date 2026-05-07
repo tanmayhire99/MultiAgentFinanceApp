@@ -49,9 +49,9 @@ What ``run()`` does
 
 3. **Synthesize the closing brief.** A single LLM call (moderator
    voice) over the transcript + portfolio context produces the
-   user-visible "Closing Brief" section. We reuse the system prompt
-   from :mod:`src.core.flows.portfolio_analysis` so output style
-   matches the existing static-flow path.
+user-visible "Closing Brief" section. We reuse the system prompt
+    from :mod:`src.core.debate` so output style
+    matches the existing pipeline path.
 
 4. **Return a** :class:`~src.core.types.StepResult` with the
    combined transcript + closing brief in ``output["text"]`` and
@@ -388,17 +388,17 @@ class PanelScopedAgent(ScopedAgent):
                 "skipped._"
             )
 
-        # Prefer the existing portfolio_analysis system prompt for
-        # style parity. Falls back to an inlined version if that
-        # module isn't importable (keeps tests light-weight).
+        # Use the shared moderator synthesis prompt + scratchpad formatter
+        # from debate.py (moved from the now-deleted portfolio_analysis flow).
+        # Falls back to an inlined version if the module isn't importable.
         try:
-            from src.core.flows.portfolio_analysis import (
-                _DEBATE_SYNTH_SYSTEM,
-                _format_scratchpad_for_moderator,
+            from src.core.debate import (
+                DEBATE_SYNTH_SYSTEM,
+                format_scratchpad_for_moderator,
             )
 
-            synth_system = _DEBATE_SYNTH_SYSTEM
-            transcript = _format_scratchpad_for_moderator(scratchpad)
+            synth_system = DEBATE_SYNTH_SYSTEM
+            transcript = format_scratchpad_for_moderator(scratchpad)
         except Exception:
             log.debug(
                 "panel agent: falling back to inline closing-brief prompt"
@@ -443,7 +443,7 @@ class PanelScopedAgent(ScopedAgent):
 
     @staticmethod
     def _format_scratchpad_inline(scratchpad: Any) -> str:
-        """Minimal scratchpad rendering when portfolio_analysis isn't available."""
+        """Minimal scratchpad rendering when debate module isn't importable."""
         try:
             entries = list(getattr(scratchpad, "entries", []) or [])
         except Exception:

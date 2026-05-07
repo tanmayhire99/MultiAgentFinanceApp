@@ -20,13 +20,6 @@ Every user query goes through this single entry point, which:
         smalltalk  — short conversational reply (zero LLM calls)
         meta_help  — curated capabilities answer (zero LLM calls)
 
-   The legacy static flows in :mod:`src.core.flows` (stock_research,
-   portfolio_analysis, deep_stock_research, topic_research,
-   educational) are **deprecated** — they are monolithic scripts that
-   call tools imperatively instead of going through the planner. They
-   remain in the codebase for reference / rollback but are no longer
-   dispatched to.
-
 5. Emits a regulatory disclaimer footer **only** for flows that produced
    real financial analysis (portfolio / stock / deep / topic). Concept
    explanations, capability listings, and chitchat get no disclaimer -
@@ -41,14 +34,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 from src.personas.base import register_tools
 from src.config import mcp_servers
 from src.core.flows import (
-    deep_stock_research,
-    educational,
     meta_help,
     planner_pipeline,
-    portfolio_analysis,
     smalltalk,
-    stock_research,
-    topic_research,
 )
 from src.core.panel import (
     PanelEvent,
@@ -60,14 +48,9 @@ from src.core.router import RouteDecision, classify_query, render_decision_card
 log = logging.getLogger("finai.dispatcher")
 
 
-_FLOW_MAP = {
-    "portfolio_analysis": portfolio_analysis.run,
-    "stock_research": stock_research.run,
-    "deep_stock_research": deep_stock_research.run,
-    "topic_research": topic_research.run,
-    "educational": educational.run,
-    "meta_help": meta_help.run,
+_FAST_PATH = {
     "smalltalk": smalltalk.run,
+    "meta_help": meta_help.run,
 }
 
 # Intents whose responses constitute "financial analysis" and therefore
@@ -170,23 +153,13 @@ _ARTIFACT_PHRASES = _re.compile(
 # ---------------------------------------------------------------------------
 # Planner-pipeline — default router
 # ---------------------------------------------------------------------------
-# All non-trivial queries now route through the planner-first pipeline
+# All non-trivial queries route through the planner-first pipeline
 # :func:`src.core.flows.planner_pipeline.run`. The `/planner` prefix is
 # retained for backwards compatibility (treated as a no-op — it no longer
 # gates anything). The only fast-path intents that skip the planner are
 # ``smalltalk`` and ``meta_help`` (zero LLM calls).
-#
-# ``FINAI_USE_LEGACY_FLOWS=1`` can be set to revert to the old static-flow
-# dispatch (deprecated — for emergency rollback only).
 _PLANNER_PREFIXES = ("/planner ", "/planner\t")
 _PLANNER_BARE = "/planner"
-
-
-def _env_use_legacy_flows() -> bool:
-    """Emergency rollback switch. Set ``FINAI_USE_LEGACY_FLOWS=1`` to
-    revert to the old static-flow dispatch."""
-    raw = (os.getenv("FINAI_USE_LEGACY_FLOWS") or "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
 
 
 def _strip_planner_prefix(query: str) -> str:
@@ -299,10 +272,9 @@ async def run_analysis(
             "rationale": f"Classifier errored; defaulting to educational. ({e})",
         }
 
-    # Stash the artifact-mode flag on the decision so each flow can
-    # decide whether to emit ``:::artifact{}:::`` wrappers. This is
-    # read by stock_research / portfolio_analysis / deep_stock_research;
-    # smalltalk / meta_help / educational ignore it (they're already
+    # Stash the artifact-mode flag on the decision so the planner
+    # pipeline can decide whether to emit ``:::artifact{}:::`` wrappers.
+    # The smalltalk/meta_help fast paths ignore it (they're already
     # short and inline).
     decision["wants_artifact"] = wants_artifact  # type: ignore[typeddict-unknown-key]
 
@@ -348,23 +320,11 @@ async def run_analysis(
     #    by default. The only exceptions are smalltalk (greetings) and
     #    meta_help (capabilities/help) — those are deterministic,
     #    zero-LLM paths that don't need a plan.
-    #
-    #    FINAI_USE_LEGACY_FLOWS=1 reverts to the old static-flow dispatch
-    #    for emergency rollback only.
     intent = decision.get("intent", "educational")
-    use_legacy = _env_use_legacy_flows()
-
-    if use_legacy:
-        flow = _FLOW_MAP.get(intent)
-        if flow is None:
-            log.warning("Legacy dispatcher: unknown intent %r; using educational", intent)
-            flow = _FLOW_MAP["educational"]
-        log.info("dispatcher: legacy mode — routing intent=%s to static flow", intent)
-    elif intent in ("smalltalk", "meta_help"):
-        flow = _FLOW_MAP[intent]
+    flow = _FAST_PATH.get(intent, planner_pipeline.run)
+    if intent in _FAST_PATH:
         log.info("dispatcher: fast-path intent=%s (no LLM needed)", intent)
     else:
-        flow = planner_pipeline.run
         log.info("dispatcher: routing intent=%s through planner-first pipeline", intent)
 
     # Per-tool narration events (`tool_call`, `tool_result`) and

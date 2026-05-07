@@ -1350,18 +1350,15 @@ async def _stream_persona_events(
 #
 #   1. Classifies the query via :mod:`src.core.router` (one small LLM call).
 #   2. Emits a visible "Query Classification" section so the audience sees
-#      which flow was picked and why.
-#   3. Dispatches to one of four flows in :mod:`src.core.flows`:
-#
-#          portfolio_analysis  - current full panel flow (lives in
-#                                ``src.core.flows.portfolio_analysis``)
-#          stock_research      - focused deep dive on specific ticker(s)
-#          topic_research      - web research on a macro / sector topic
-#          educational         - direct LLM explanation, zero agents
+#      which intent was picked and why.
+#   3. Routes all non-trivial intents through the planner-first pipeline
+#      (:func:`src.core.flows.planner_pipeline.run`), which generates a
+#      plan and dispatches standalone :class:`ScopedAgent` instances.
+#      The only fast-path intents are smalltalk and meta_help (zero LLM).
 #
 #   4. Appends a universal disclaimer footer + terminal event.
 #
 # The heavy lifting helpers (``PortfolioContext``, orchestrator phases,
 # ``_stream_persona_events``, etc.) defined above are now shared across
-# all flows that need them.
+# all agents that need them.
 # ---------------------------------------------------------------------------
