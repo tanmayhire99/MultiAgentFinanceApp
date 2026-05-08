@@ -213,7 +213,7 @@ class ToolFilteringTests(unittest.TestCase):
         )
         self.assertEqual(sa.mcp_tools, [])
         # Synthetic tools should still exist
-        self.assertEqual(len(sa.synthetic_tools), 2)
+        self.assertEqual(len(sa.synthetic_tools), 3)
 
     def test_subset_preserves_order(self):
         sa = ScopedAgent(
@@ -393,6 +393,116 @@ class RequestAssistanceTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# run_python synthetic tool
+# ---------------------------------------------------------------------------
+class RunPythonTests(unittest.TestCase):
+    def _make_agent(self) -> ScopedAgent:
+        return ScopedAgent(
+            step=_step(tool_subset=[]),
+            scratchpad=Scratchpad(query="x"),
+            all_mcp_tools=_make_research_pool(),
+            model=_fake_model(AIMessage(content="ok")),
+            intent_flags=_flags(),
+        )
+
+    def _get_tool(self, agent: ScopedAgent) -> StructuredTool:
+        return next(
+            t for t in agent.synthetic_tools if t.name == "run_python"
+        )
+
+    def test_basic_arithmetic(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "result = 2 + 3 * 4"}))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["result"], 14)
+
+    def test_print_output(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "print(42)"}))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["stdout"], "42")
+
+    def test_math_module(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({
+            "code": "from math import comb\nresult = comb(52, 5)"
+        }))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["result"], 2598960)
+
+    def test_decimal_precision(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({
+            "code": (
+                "from decimal import Decimal, ROUND_HALF_UP\n"
+                "d = Decimal('1.005').quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n"
+                "result = str(d)"
+            )
+        }))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["result"], "1.01")
+
+    def test_error_returns_traceback(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "1 / 0"}))
+        self.assertFalse(out["success"])
+        self.assertIn("ZeroDivisionError", out["error"])
+
+    def test_syntax_error_returns_traceback(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "if True"}))
+        self.assertFalse(out["success"])
+        self.assertIn("SyntaxError", out["error"])
+
+    def test_no_file_access(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "open('/etc/passwd')"}))
+        self.assertFalse(out["success"])
+
+    def test_no_import_os(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({"code": "import os"}))
+        self.assertFalse(out["success"])
+
+    def test_financial_ratio_computation(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({
+            "code": (
+                "net_income = 96995  # AAPL 2023 net income (millions)\n"
+                "revenue = 383285    # AAPL 2023 revenue (millions)\n"
+                "profit_margin = round(net_income / revenue * 100, 2)\n"
+                "print(f'Net profit margin: {profit_margin}%')\n"
+                "result = profit_margin"
+            )
+        }))
+        self.assertTrue(out["success"])
+        self.assertAlmostEqual(out["result"], 25.31, places=2)
+
+    def test_compound_growth(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({
+            "code": (
+                "from decimal import Decimal\n"
+                "initial = Decimal('100')\n"
+                "rate = Decimal('0.08')\n"
+                "years = 10\n"
+                "final = initial * (1 + rate) ** years\n"
+                "result = round(float(final), 2)"
+            )
+        }))
+        self.assertTrue(out["success"])
+        self.assertAlmostEqual(out["result"], 215.89, places=2)
+
+    def test_converts_result_to_json(self):
+        tool = self._get_tool(self._make_agent())
+        out = json.loads(tool.invoke({
+            "code": "result = {'pe': 28.5, 'eps': 6.42}"
+        }))
+        self.assertTrue(out["success"])
+        self.assertEqual(out["result"]["pe"], 28.5)
+
+
+# ---------------------------------------------------------------------------
 # System prompt assembly
 # ---------------------------------------------------------------------------
 class SystemPromptTests(unittest.TestCase):
@@ -467,6 +577,10 @@ class SystemPromptTests(unittest.TestCase):
         prompt = self._build()
         self.assertIn("request_assistance", prompt)
         self.assertIn("get_prior_result", prompt)
+
+    def test_mentions_run_python(self):
+        prompt = self._build()
+        self.assertIn("run_python", prompt)
 
 
 # ---------------------------------------------------------------------------

@@ -119,7 +119,8 @@ class _RequestAssistanceArgs(BaseModel):
     """Arguments for the ``request_assistance`` synthetic tool."""
 
     target_agent: str = Field(
-        ..., min_length=1,
+        ...,
+        min_length=1,
         description=(
             "The name of the agent you believe can fill this gap "
             "(e.g. 'us_stock_agent'). See your system prompt's agent "
@@ -133,6 +134,23 @@ class _RequestAssistanceArgs(BaseModel):
             "current step cannot proceed without it. Be specific - "
             "the planner sees this verbatim and uses it to decide "
             "whether to add a follow-up step."
+        ),
+    )
+
+
+class _RunPythonArgs(BaseModel):
+    """Arguments for the ``run_python`` synthetic tool."""
+
+    code: str = Field(
+        ...,
+        min_length=1,
+        max_length=4000,
+        description=(
+            "Python code to execute. Must be a self-contained block "
+            "that computes a result. Use `print()` for text output; "
+            "the last expression is also captured as `result`. "
+            "Available: math, decimal, statistics, fractions, "
+            "datetime, itertools, json, re. No file or network access."
         ),
     )
 
@@ -247,18 +265,18 @@ class ScopedAgent:
         return [by_name[n] for n in tool_subset]
 
     def _build_synthetic_tools(self) -> List[BaseTool]:
-        """Construct ``get_prior_result`` and ``request_assistance``.
+        """Construct ``get_prior_result``, ``request_assistance``, and ``run_python``.
 
-        Both close over ``self.step`` and ``self.scratchpad``. They are
+        All close over ``self.step`` and ``self.scratchpad``. They are
         re-built per ScopedAgent instance because their behaviour
         depends on the step's ``depends_on`` set.
         """
         deps_set = set(self.step.depends_on)
-        # Pre-format for stable, sorted display in tool descriptions
         deps_list = sorted(deps_set)
         return [
             self._build_get_prior_result_tool(deps_set, deps_list),
             self._build_request_assistance_tool(),
+            self._build_run_python_tool(),
         ]
 
     def _build_get_prior_result_tool(
@@ -368,7 +386,135 @@ class ScopedAgent:
                 "may act on in a replan. After calling this you should "
                 "finish your step with whatever data you have."
             ),
-            args_schema=_RequestAssistanceArgs,
+        args_schema=_RequestAssistanceArgs,
+    )
+
+    # ------------------------------------------------------------------
+    # run_python — sandboxed numerical computation
+    # ------------------------------------------------------------------
+    _SAFE_BUILTINS = {
+        "abs": abs, "all": all, "any": any, "bin": bin, "bool": bool,
+        "chr": chr, "dict": dict, "divmod": divmod, "enumerate": enumerate,
+        "filter": filter, "float": float, "format": format, "hex": hex,
+        "int": int, "isinstance": isinstance, "iter": iter,
+        "len": len, "list": list, "map": map, "max": max, "min": min,
+        "oct": oct, "ord": ord, "pow": pow, "print": print,
+        "range": range, "repr": repr, "reversed": reversed,
+        "round": round, "set": set, "sorted": sorted, "str": str,
+        "sum": sum, "tuple": tuple, "zip": zip,
+    }
+
+    _SAFE_MODULES = {
+        "math": __import__("math"),
+        "decimal": __import__("decimal"),
+        "statistics": __import__("statistics"),
+        "fractions": __import__("fractions"),
+        "datetime": __import__("datetime"),
+        "itertools": __import__("itertools"),
+        "json": __import__("json"),
+        "re": __import__("re"),
+    }
+
+    @staticmethod
+    def _safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name in ScopedAgent._SAFE_MODULES:
+            return ScopedAgent._SAFE_MODULES[name]
+        if name in ("__future__",):
+            return __import__(name, *args, **kwargs)
+        raise ImportError(f"Module {name!r} is not in the safe import whitelist")
+
+    _EXEC_TIMEOUT_SECONDS = 10
+
+    def _build_run_python_tool(self) -> BaseTool:
+        step = self.step
+
+        def _run_python(code: str) -> str:
+            """Execute Python code in a sandboxed environment and return the result."""
+            import signal
+            import sys
+            import traceback
+            from io import StringIO
+
+            local_ns: dict[str, Any] = {}
+            for mod_name, mod in ScopedAgent._SAFE_MODULES.items():
+                local_ns[mod_name] = mod
+            safe_builtins = dict(ScopedAgent._SAFE_BUILTINS)
+            safe_builtins["__import__"] = ScopedAgent._safe_import
+            local_ns["__builtins__"] = safe_builtins
+
+            stdout_buf = StringIO()
+            old_stdout = sys.stdout
+            old_handler = None
+            error = None
+
+            try:
+                compiled = compile(code, "<run_python>", "exec")
+
+                if hasattr(signal, "SIGALM"):
+                    old_handler = signal.getsignal(signal.SIGALM)
+                    signal.signal(
+                        signal.SIGALM,
+                        lambda _s, _f: (_ for _ in ()).throw(
+                            TimeoutError("Code execution timed out")
+                        ),
+                    )
+                    signal.alarm(ScopedAgent._EXEC_TIMEOUT_SECONDS)
+
+                sys.stdout = stdout_buf
+                try:
+                    exec(compiled, local_ns, local_ns)
+                except Exception:
+                    error = traceback.format_exc().strip()
+            except SyntaxError:
+                error = traceback.format_exc().strip()
+            finally:
+                sys.stdout = old_stdout
+                if hasattr(signal, "SIGALM"):
+                    signal.alarm(0)
+                    if old_handler is not None:
+                        signal.signal(signal.SIGALM, old_handler)
+
+            result_val = None
+            if error is None:
+                for _name in ("ans", "result", "answer", "_"):
+                    if _name in local_ns:
+                        result_val = local_ns[_name]
+                        break
+
+            log.info(
+                "step %d (%s) ran_python: %d chars, error=%s",
+                step.id, step.agent, len(code), bool(error),
+            )
+
+            out: dict[str, Any] = {"success": error is None}
+            stdout_text = stdout_buf.getvalue().strip()
+            if stdout_text:
+                out["stdout"] = stdout_text
+            if result_val is not None:
+                out["result"] = result_val
+            if error is not None:
+                out["error"] = error
+
+            if not out.get("stdout") and not out.get("result") and not out.get("error"):
+                out["stdout"] = "(no output — use print() or assign to `result`)"
+
+            return json.dumps(out, default=str)
+
+        return StructuredTool.from_function(
+            func=_run_python,
+            name="run_python",
+            description=(
+                "Execute Python code in a sandboxed environment for precise "
+                "numerical computation. Use this when you need to calculate "
+                "financial ratios, apply GAAP/IFRS formulas, compound growth "
+                "rates, depreciation schedules, or any arithmetic that must be "
+                "exact — LLM-generated numbers are often wrong. Available "
+                "modules: math, decimal, statistics, fractions, datetime, "
+                "itertools, json, re. No file or network access. Print your "
+                "answer or assign it to a variable named `result`. Execution "
+                "timeout: 10 seconds."
+            ),
+            args_schema=_RunPythonArgs,
         )
 
     def _build_system_prompt(self) -> str:
@@ -401,6 +547,11 @@ class ScopedAgent:
             "- You can read prior step outputs via "
             "`get_prior_result(step_id)`, but ONLY for step IDs in your "
             f"depends_on list: {deps_repr}\n"
+            "- You can run Python code via `run_python(code)` for precise "
+            "numerical computation (financial ratios, growth rates, "
+            "depreciation, compounding, etc.). **Always prefer "
+            "run_python over mental arithmetic** — LLM-generated numbers "
+            "are often wrong.\n"
             "- If you need help from another agent, call "
             "`request_assistance(target_agent, reason)` to record a note "
             "for the orchestrator. **Do NOT try to do another agent's "
@@ -507,6 +658,7 @@ class ScopedAgent:
         the final ``StepResult`` without re-invoking the LLM.
         """
         kind = event.get("event")
+        _SYNTHETIC_TOOLS = {"get_prior_result", "request_assistance", "run_python"}
 
         if kind == "on_chat_model_start":
             self._thinking_banner_emitted = getattr(self, "_thinking_banner_emitted", False)
@@ -548,9 +700,7 @@ class ScopedAgent:
                 tool_args = event.get("data", {}).get("input", {}) or {}
             except Exception:
                 pass
-            if tool_name and tool_name not in (
-                "get_prior_result", "request_assistance"
-            ):
+            if tool_name and tool_name not in _SYNTHETIC_TOOLS:
                 yield {
                     "type": "step_tool_call",
                     "persona": agent_name,
@@ -561,9 +711,7 @@ class ScopedAgent:
         elif kind == "on_tool_end":
             tool_name = event.get("name", "")
             raw_output = event.get("data", {}).get("output")
-            if tool_name and tool_name not in (
-                "get_prior_result", "request_assistance"
-            ):
+            if tool_name and tool_name not in _SYNTHETIC_TOOLS:
                 preview = self._tool_result_preview(raw_output)
                 yield {
                     "type": "step_tool_result",

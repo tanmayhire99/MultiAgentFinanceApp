@@ -212,6 +212,14 @@ Intent flags: all False.
 {example_educational}
 ```
 
+### Example H — numerical reasoning (accounting / ratio computation)
+User query: "What is Apple's net profit margin and ROE for 2023?"
+Intent flags: wants_filings=True.
+
+```json
+{example_numerical_reasoning}
+```
+
 ## Output contract
 
 Return EXACTLY one JSON object. No code fence, no commentary.
@@ -429,6 +437,33 @@ _EXAMPLE_EDUCATIONAL = {
     ],
 }
 
+_EXAMPLE_NUMERICAL_REASONING = {
+    "schema_version": "1.0",
+    "goal": "Compute Apple's net profit margin and ROE for FY2023 using exact numbers from fundamentals.",
+    "rationale": "Numerical reasoning query — us_stock_agent fetches raw fundamentals, synthesizer uses run_python to compute exact ratios (avoiding LLM arithmetic errors), then presents the answer.",
+    "estimated_complexity": "low",
+    "steps": [
+        {
+            "id": 1,
+            "description": "Fetch AAPL fundamentals (net income, revenue, shareholders equity) via the US Stock Agent.",
+            "agent": "us_stock_agent",
+            "tool_subset": [
+                "us_stock__get_fundamentals",
+            ],
+            "depends_on": [],
+            "max_tool_calls": 3,
+        },
+        {
+            "id": 2,
+            "description": "Use run_python to compute net profit margin (net_income/revenue) and ROE (net_income/equity) from step 1's data, then write the answer for the user.",
+            "agent": "synthesizer",
+            "tool_subset": [],
+            "depends_on": [1],
+            "max_tool_calls": 0,
+        },
+    ],
+}
+
 _EXAMPLE_CLAIM_TRACKING = {
     "schema_version": "1.0",
     "goal": "Verify Tesla's FSD timeline claims against reality.",
@@ -511,6 +546,7 @@ def _build_system_prompt(
         example_portfolio_simple=json.dumps(_EXAMPLE_PORTFOLIO_SIMPLE, indent=2),
         example_topic_research=json.dumps(_EXAMPLE_TOPIC_RESEARCH, indent=2),
         example_educational=json.dumps(_EXAMPLE_EDUCATIONAL, indent=2),
+        example_numerical_reasoning=json.dumps(_EXAMPLE_NUMERICAL_REASONING, indent=2),
     )
 
 
