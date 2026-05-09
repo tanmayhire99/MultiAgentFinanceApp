@@ -101,6 +101,7 @@ def build_research_agent(
         max_tokens=1500,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -134,6 +135,7 @@ def build_filings_agent(
         max_tokens=3000,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -177,6 +179,7 @@ def build_us_stock_agent(
         max_tokens=1500,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -213,6 +216,7 @@ def build_indian_stock_agent(
         max_tokens=1500,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -253,6 +257,7 @@ def build_portfolio_agent(
         max_tokens=1500,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -291,6 +296,7 @@ def build_claim_agent(
         max_tokens=2000,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,
@@ -385,6 +391,7 @@ def build_synthesizer(
         max_tokens=4000,
         streaming=True,
         api_key_slot=api_key_slot,
+        cycle_keys=True,
     )
     return ScopedAgent(
         step=step,

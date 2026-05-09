@@ -180,6 +180,7 @@ async def run(
         temperature=0.5,
         max_tokens=200,
         streaming=True,
+        cycle_keys=True,
     )
     messages = [
         SystemMessage(content=_LLM_SYSTEM),

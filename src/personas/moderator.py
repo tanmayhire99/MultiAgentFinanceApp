@@ -67,7 +67,7 @@ async def moderator_open_stream(
             produced by :meth:`src.core.panel.PortfolioContext.moderator_context_block`).
             Empty string when no portfolio context is available.
     """
-    llm = build_chat_model(temperature=0.3, max_tokens=500)
+    llm = build_chat_model(temperature=0.3, max_tokens=500, cycle_keys=True)
     user_block = f"User's question: {user_query}"
     if portfolio_brief:
         user_block += (
@@ -115,7 +115,7 @@ async def moderator_synthesise_stream(
     """Yield the moderator's closing synthesis token-by-token."""
     # Slightly more room for synthesis since portfolio-aware runs carry
     # more structural content (agreement + disagreement + takeaway + caveat).
-    llm = build_chat_model(temperature=0.2, max_tokens=900)
+    llm = build_chat_model(temperature=0.2, max_tokens=900, cycle_keys=True)
     transcript = _format_verdicts_for_synthesis(verdicts)
     portfolio_line = (
         f"\nPortfolio snapshot: {portfolio_brief}\n"

@@ -76,18 +76,22 @@ def _extra_body_for(model: str) -> Dict[str, Any]:
 # to its own slot so that concurrent persona LLM calls hit different keys -
 # NIM serialises / rate-limits per key, so this removes the main bottleneck.
 _API_KEY_SLOTS: Dict[str, str] = {}
+_API_KEYS_ORDERED: List[str] = []  # all keys, primary first, then 1..6
 
 
 def _load_api_keys() -> None:
     """Populate :data:`_API_KEY_SLOTS` from the process environment."""
+    global _API_KEYS_ORDERED
     primary = os.getenv("NVIDIA_API_KEY", "").strip()
     if not primary:
         raise ValueError("NVIDIA_API_KEY environment variable is missing")
     _API_KEY_SLOTS["primary"] = primary
+    _API_KEYS_ORDERED = [primary]
     for slot in ("1", "2", "3", "4", "5", "6"):
         key = (os.getenv(f"NVIDIA_API_KEY_{slot}") or "").strip()
         if key:
             _API_KEY_SLOTS[slot] = key
+            _API_KEYS_ORDERED.append(key)
 
 
 _load_api_keys()
@@ -96,6 +100,11 @@ _load_api_keys()
 def get_api_key(slot: str = "primary") -> str:
     """Return the key for ``slot``, falling back to the primary key."""
     return _API_KEY_SLOTS.get(slot) or _API_KEY_SLOTS["primary"]
+
+
+def get_keys_pool() -> List[str]:
+    """Return all available API keys in order: primary then 1..6."""
+    return list(_API_KEYS_ORDERED)
 
 
 def list_configured_slots() -> List[str]:
@@ -150,6 +159,7 @@ def build_chat_model(
     api_key: Optional[str] = None,
     api_key_slot: str = "primary",
     response_format: Optional[Dict[str, Any]] = None,
+    cycle_keys: bool = False,
 ) -> ChatOpenAI:
     """Construct a ``ChatOpenAI`` bound to NVIDIA NIM with thinking disabled.
 
@@ -167,6 +177,17 @@ def build_chat_model(
     streaming (without dropped connections) reliable.
 
     ``api_key`` overrides ``api_key_slot`` when provided.
+
+    Key cycling
+    -----------
+    When ``cycle_keys=True`` (default for pool callers), the returned model
+    will transparently retry on retryable errors (429, 500, 502, 504,
+    timeouts, connection errors) by cycling to the next available API key.
+    Once a key succeeds it becomes the default for subsequent calls. This
+    eliminates downtime from individual key rate-limit exhaustion.
+
+    Set ``cycle_keys=False`` when the caller needs a specific slot (persona
+    keys for panel concurrency) or when ``api_key`` is provided directly.
 
     Structured output
     -----------------
@@ -187,7 +208,147 @@ def build_chat_model(
     )
     if response_format is not None:
         kwargs["model_kwargs"] = {"response_format": response_format}
-    return ChatOpenAI(**kwargs)
+
+    if not cycle_keys or api_key is not None:
+        return ChatOpenAI(**kwargs)
+
+    keys_to_try = _build_key_rotation(api_key_slot)
+    if len(keys_to_try) <= 1:
+        return ChatOpenAI(**kwargs)
+
+    kwargs.pop("api_key")
+    return _CyclingChatOpenAI(keys=keys_to_try, **kwargs)
+
+
+def _build_key_rotation(preferred: str) -> List[str]:
+    """Build a key rotation starting with ``preferred``, then all others."""
+    seen: set[str] = set()
+    ordered: List[str] = []
+    pk = _API_KEY_SLOTS.get(preferred)
+    if pk and pk not in seen:
+        ordered.append(pk)
+        seen.add(pk)
+    for k in _API_KEYS_ORDERED:
+        if k not in seen:
+            ordered.append(k)
+            seen.add(k)
+    return ordered
+
+
+# Exception types worth retrying on a different key.
+#  - RateLimitError (429): key exhausted its quota
+#  - InternalServerError (500/502/503/504): server-side issue
+#  - APITimeoutError: request timed out
+#  - APIConnectionError: connection refused/reset
+#  - httpx.RemoteProtocolError: server disconnected mid-response
+# We do NOT retry BadRequestError (400), AuthenticationError (401 on same
+# key won't fix itself), NotFoundError (404).
+def _is_key_exhaustion_error(exc: BaseException) -> bool:
+    try:
+        import httpx
+        if isinstance(exc, httpx.RemoteProtocolError):
+            return True
+    except ImportError:
+        pass
+    try:
+        import openai
+        if isinstance(exc, (
+            openai.RateLimitError,
+            openai.InternalServerError,
+            openai.APITimeoutError,
+            openai.APIConnectionError,
+        )):
+            return True
+        if isinstance(exc, openai.APIStatusError):
+            return exc.status_code in (429, 500, 502, 503, 504)
+    except ImportError:
+        pass
+    return False
+
+
+class _CyclingChatOpenAI(ChatOpenAI):
+    """ChatOpenAI that cycles API keys on exhaustion errors.
+
+    Transparent to callers — same API as ``ChatOpenAI``. On any retryable
+    error (429, 500-504, timeout, connection reset), cycles to the next
+    key in the pool and retries. Once a key succeeds, it becomes the
+    preferred key for subsequent calls.
+    """
+
+    _keys: List[str]
+    _current_index: int
+
+    def __init__(self, keys: List[str], **kwargs: Any) -> None:
+        super().__init__(api_key=keys[0], **kwargs)
+        self._keys = list(keys)
+        self._current_index = 0
+
+    def _next_key(self) -> str:
+        self._current_index = (self._current_index + 1) % len(self._keys)
+        return self._keys[self._current_index]
+
+    def _swap_key(self, new_key: str) -> None:
+        self.openai_api_key = new_key
+        # Invalidate cached clients so they pick up the new key
+        for attr in ("_client", "_async_client", "_root_client",
+                      "_root_async_client", "client", "async_client",
+                      "root_client", "root_async_client"):
+            try:
+                object.__setattr__(self, attr, None)
+            except (AttributeError, TypeError):
+                pass
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        last_exc: Optional[BaseException] = None
+        for attempt in range(len(self._keys)):
+            if attempt > 0:
+                new_key = self._next_key()
+                self._swap_key(new_key)
+            try:
+                return await super()._agenerate(
+                    messages, stop=stop, run_manager=run_manager, **kwargs
+                )
+            except Exception as exc:
+                if not _is_key_exhaustion_error(exc):
+                    raise
+                last_exc = exc
+                if attempt == len(self._keys) - 1:
+                    raise last_exc  # type: ignore[misc]
+                import logging
+                log = logging.getLogger("finai.key_cycling")
+                log.warning(
+                    "Key %d/%d exhausted (%s: %s), trying next key",
+                    attempt + 1, len(self._keys),
+                    type(exc).__name__, str(exc)[:200],
+                )
+        raise last_exc  # type: ignore[misc]
+
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+        last_exc: Optional[BaseException] = None
+        for attempt in range(len(self._keys)):
+            if attempt > 0:
+                new_key = self._next_key()
+                self._swap_key(new_key)
+            try:
+                async for chunk in super()._astream(
+                    messages, stop=stop, run_manager=run_manager, **kwargs
+                ):
+                    yield chunk
+                return
+            except Exception as exc:
+                if not _is_key_exhaustion_error(exc):
+                    raise
+                last_exc = exc
+                if attempt == len(self._keys) - 1:
+                    raise last_exc  # type: ignore[misc]
+                import logging
+                log = logging.getLogger("finai.key_cycling")
+                log.warning(
+                    "Key %d/%d exhausted during streaming (%s: %s), trying next key",
+                    attempt + 1, len(self._keys),
+                    type(exc).__name__, str(exc)[:200],
+                )
+        raise last_exc  # type: ignore[misc]
 
 
 def _format_system_prompt(persona: PersonaDef) -> str:

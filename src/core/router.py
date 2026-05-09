@@ -301,6 +301,7 @@ async def classify_query(
         max_tokens=800,
         streaming=False,
         response_format={"type": "json_object"},
+        cycle_keys=True,
     )
     context_hint = _build_context_hint(history, query)
     user_content = f'Query: "{query.strip()}"' + context_hint + "\n\nClassify now."

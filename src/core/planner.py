@@ -636,6 +636,7 @@ async def plan(
         max_tokens=2500,
         streaming=False,
         response_format={"type": "json_object"},
+        cycle_keys=True,
     )
 
     last_raw: Optional[str] = None

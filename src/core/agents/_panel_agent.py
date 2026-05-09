@@ -421,6 +421,7 @@ class PanelScopedAgent(ScopedAgent):
         )
         llm = build_chat_model(
             temperature=0.2, max_tokens=1100, streaming=False,
+            cycle_keys=True,
         )
         response = await llm.ainvoke(
             [

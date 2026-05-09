@@ -160,6 +160,7 @@ async def extract_forward_claims(
         max_tokens=1800,
         streaming=False,
         response_format={"type": "json_object"},
+        cycle_keys=True,
     )
 
     user_msg = (
@@ -265,6 +266,7 @@ async def compare_claim_to_reality(
         max_tokens=900,
         streaming=False,
         response_format={"type": "json_object"},
+        cycle_keys=True,
     )
 
     user_msg = (
