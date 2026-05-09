@@ -11,14 +11,14 @@ Phase 2 = planner). The executor:
 3. Yields :class:`PanelEvent`-shaped status events the pipeline can
    forward to the user as live progress.
 
-Sequential v0
--------------
-The first version runs steps **sequentially** in topological order
-(no ``asyncio.gather``). For the claim-tracker slice this is fine —
-the typical plan has 5 steps and most have data dependencies on
-prior steps anyway. Parallel execution of independent ready steps
-is a Day-7 enhancement; the entry point's signature is parallel-
-ready so the upgrade is a swap, not a rewrite.
+Parallel execution
+------------------
+Independent ready steps (those whose ``depends_on`` are all satisfied)
+are dispatched concurrently via ``asyncio.gather``. Steps that share
+no dependency edge run in parallel; steps that depend on prior results
+wait for those results before starting. Event streams from concurrent
+steps are multiplexed into the single output ``AsyncIterator`` in
+arrival order.
 
 Failure handling
 ----------------
@@ -40,6 +40,7 @@ running the synthesizer step or the joiner replan loop.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import AsyncIterator, Dict, List, Optional, Sequence
@@ -96,14 +97,80 @@ async def execute(
     scratchpad as side-effects (the scratchpad is the caller's
     accumulator; the executor mutates it but doesn't return it).
 
-    Sequential v0: runs ready steps one at a time in topological
-    order. Independent ready steps are NOT yet parallelised.
+    Independent ready steps are dispatched concurrently via
+    ``asyncio.gather``; their event streams are multiplexed into
+    the single output iterator in arrival order.
     """
     total_steps = len(plan.steps)
     started = time.time()
     yield _status(
         f"Plan: {total_steps} step(s) targeting agents "
         f"{sorted(plan.all_agents())}"
+    )
+
+    iterations = 0
+    max_iterations = total_steps + 5
+    while iterations < max_iterations:
+        iterations += 1
+        terminal = scratchpad.terminal_ids()
+        if len(terminal) >= total_steps:
+            break
+
+        completed = scratchpad.completed_ids()
+        ready = [
+            s for s in plan.steps
+            if s.id not in terminal
+            and all(dep in completed for dep in s.depends_on)
+        ]
+
+        if not ready:
+            remaining = [s for s in plan.steps if s.id not in terminal]
+            for s in remaining:
+                yield _status(
+                    f"Step {s.id} ({s.agent}) skipped — depends on "
+                    f"a failed/skipped ancestor"
+                )
+                scratchpad.add(StepResult(
+                    step_id=s.id,
+                    status="skipped",
+                    output=None,
+                    started_at=time.time(),
+                    completed_at=time.time(),
+                ))
+            break
+
+        if len(ready) == 1:
+            async for ev in _run_one_step(
+                step=ready[0],
+                scratchpad=scratchpad,
+                intent_flags=intent_flags,
+                all_mcp_tools=all_mcp_tools,
+                registry=registry,
+                recursion_limit=recursion_limit,
+            ):
+                yield ev
+        else:
+            async for ev in _run_parallel_steps(
+                steps=ready,
+                scratchpad=scratchpad,
+                intent_flags=intent_flags,
+                all_mcp_tools=all_mcp_tools,
+                registry=registry,
+                recursion_limit=recursion_limit,
+            ):
+                yield ev
+
+    duration = time.time() - started
+    completed = len(scratchpad.completed_ids())
+    failed = sum(
+        1 for r in scratchpad.results.values() if r.status == "failed"
+    )
+    skipped = sum(
+        1 for r in scratchpad.results.values() if r.status == "skipped"
+    )
+    yield _status(
+        f"Plan execution complete: {completed} ok, {failed} failed, "
+        f"{skipped} skipped, in {duration:.1f}s"
     )
 
     # The walker uses ``terminal_ids`` (complete ∪ failed ∪ skipped)
@@ -176,6 +243,51 @@ async def execute(
         f"Plan execution complete: {completed} ok, {failed} failed, "
         f"{skipped} skipped, in {duration:.1f}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# Parallel step runner
+# ---------------------------------------------------------------------------
+async def _run_parallel_steps(
+    *,
+    steps: List[PlanStep],
+    scratchpad: Scratchpad,
+    intent_flags: Dict[str, bool],
+    all_mcp_tools: Sequence[BaseTool],
+    registry: AgentRegistry,
+    recursion_limit: int,
+) -> AsyncIterator[PanelEvent]:
+    """Run multiple independent steps concurrently, multiplexing events.
+
+    Each step's event stream is collected into a per-step list, then
+    yielded in step-id order after all steps finish. This ensures
+    deterministic output ordering while getting the latency benefit
+    of concurrent execution.
+
+    Steps that fail do not block others — all steps run to completion
+    (or failure) regardless of sibling outcomes.
+    """
+    step_events: Dict[int, List[PanelEvent]] = {s.id: [] for s in steps}
+
+    async def _collect_step(step: PlanStep) -> None:
+        async for ev in _run_one_step(
+            step=step,
+            scratchpad=scratchpad,
+            intent_flags=intent_flags,
+            all_mcp_tools=all_mcp_tools,
+            registry=registry,
+            recursion_limit=recursion_limit,
+        ):
+            step_events[step.id].append(ev)
+
+    await asyncio.gather(
+        *(_collect_step(s) for s in steps),
+        return_exceptions=False,
+    )
+
+    for step in steps:
+        for ev in step_events[step.id]:
+            yield ev
 
 
 # ---------------------------------------------------------------------------

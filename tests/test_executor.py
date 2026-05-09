@@ -4,13 +4,14 @@ Coverage:
 
 1. Happy path — 3-step plan runs in topological order; all results
    land in the scratchpad with status=complete.
-2. Sequential dispatch — the executor takes one ready step at a time
-   (v0 behaviour; parallelism is a Day-7 enhancement).
+2. Parallel dispatch — independent ready steps run concurrently via
+   asyncio.gather; events are yielded in step-id order.
 3. Failed step — descendants get marked skipped, the executor still
    completes its walk.
 4. Construction failure (ScopedAgentError) — step marked failed,
    error event emitted, walk continues.
-5. Status events — every step gets a "starting" and a "done" status.
+5. Run exception — agent.run() raising is caught as a failed StepResult.
+6. Status events — every step gets a "starting" and a "done" status.
 
 Mocking strategy
 ----------------
@@ -22,7 +23,7 @@ exactly what the mock exercises.
 
 Run via::
 
-    docker exec finai-api python -m unittest tests.test_executor -v
+    uv run pytest tests/test_executor.py -v
 """
 from __future__ import annotations
 
@@ -76,7 +77,6 @@ def _make_fake_agent(*, step: PlanStep, result: StepResult) -> MagicMock:
     fake.step = step
 
     async def _run():
-        # Yield the terminal _step_result event that carries the StepResult
         yield {"type": "_step_result", "result": result}
 
     fake.run = _run
@@ -116,7 +116,7 @@ def _drain_executor(plan: Plan, scratchpad: Scratchpad,
             plan=plan,
             scratchpad=scratchpad,
             intent_flags=intent_flags,
-            all_mcp_tools=[],  # unused by the mock factory
+            all_mcp_tools=[],
         ):
             events.append(ev)
         return events
@@ -129,7 +129,6 @@ def _drain_executor(plan: Plan, scratchpad: Scratchpad,
 # ---------------------------------------------------------------------------
 class HappyPathTests(unittest.TestCase):
     def test_three_step_plan_executes_in_topo_order(self):
-        # Plan: 1 -> 3 (synth depends on both), 2 -> 3
         s1 = _step(1, agent="research_agent")
         s2 = _step(2, agent="filings_agent")
         s3 = _step(3, agent="synthesizer", deps=[1, 2])
@@ -148,18 +147,15 @@ class HappyPathTests(unittest.TestCase):
         ):
             events = _drain_executor(plan, scratchpad, _flags())
 
-        # All three steps ran in topo order: 1 and 2 (any order)
-        # before 3.
         self.assertEqual(set(order_seen), {1, 2, 3})
         self.assertEqual(order_seen[-1], 3, "synthesizer must run last")
         self.assertLess(order_seen.index(1), order_seen.index(3))
         self.assertLess(order_seen.index(2), order_seen.index(3))
 
-        # Every step has a complete result in the scratchpad
         for step_id in (1, 2, 3):
             r = scratchpad.get(step_id)
             self.assertIsNotNone(r)
-            self.assertEqual(r.status, "complete")  # type: ignore[union-attr]
+            self.assertEqual(r.status, "complete")
 
     def test_yields_status_events_per_step(self):
         s1 = _step(1)
@@ -178,9 +174,8 @@ class HappyPathTests(unittest.TestCase):
             ev["text"] for ev in events
             if ev.get("type") == "_status"
         ]
-        # At minimum: header + per-step start + per-step end + footer
         self.assertGreaterEqual(len(statuses), 5)
-        self.assertTrue(any("Plan:" in s for s in statuses))  # header
+        self.assertTrue(any("Plan:" in s for s in statuses))
         self.assertTrue(any("Step 1: research_agent" in s for s in statuses))
         self.assertTrue(any("Step 2: research_agent" in s for s in statuses))
         self.assertTrue(any("Step 1 ✓" in s for s in statuses))
@@ -191,19 +186,48 @@ class HappyPathTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Failure handling
+# Parallel execution
 # ---------------------------------------------------------------------------
-class FailureTests(unittest.TestCase):
-    def test_failed_step_marks_descendants_as_skipped(self):
-        # Plan: 1 fails -> 2 (depends on 1), 3 (independent)
+class ParallelExecutionTests(unittest.TestCase):
+    def test_independent_steps_run_concurrently(self):
         s1 = _step(1, agent="research_agent")
-        s2 = _step(2, agent="filings_agent", deps=[1])
-        s3 = _step(3, agent="synthesizer", deps=[2])
+        s2 = _step(2, agent="filings_agent")
+        s3 = _step(3, agent="synthesizer", deps=[1, 2])
+        plan = _plan(s1, s2, s3)
+        scratchpad = Scratchpad(query="q")
+
+        call_times: Dict[int, float] = {}
+
+        def fake_factory(*, step: PlanStep, **_kwargs):
+            call_times[step.id] = time.time()
+            return _make_fake_agent(step=step, result=_ok_result(step.id))
+
+        with patch(
+            "src.core.executor.build_scoped_agent_for_step",
+            side_effect=fake_factory,
+        ):
+            events = _drain_executor(plan, scratchpad, _flags())
+
+        self.assertEqual(scratchpad.get(1).status, "complete")
+        self.assertEqual(scratchpad.get(2).status, "complete")
+        self.assertEqual(scratchpad.get(3).status, "complete")
+
+        if 1 in call_times and 2 in call_times:
+            delta = abs(call_times[1] - call_times[2])
+            self.assertLess(
+                delta, 0.1,
+                f"Steps 1 and 2 should be dispatched concurrently "
+                f"(delta={delta:.3f}s)",
+            )
+
+    def test_parallel_failure_does_not_block_sibling(self):
+        s1 = _step(1, agent="research_agent")
+        s2 = _step(2, agent="filings_agent")
+        s3 = _step(3, agent="synthesizer", deps=[1, 2])
         plan = _plan(s1, s2, s3)
         scratchpad = Scratchpad(query="q")
 
         def fake_factory(*, step: PlanStep, **_kwargs):
-            # Step 1 fails; the others would succeed if they ran
             if step.id == 1:
                 return _make_fake_agent(
                     step=step, result=_failed_result(1, error="api timeout")
@@ -216,24 +240,65 @@ class FailureTests(unittest.TestCase):
         ):
             events = _drain_executor(plan, scratchpad, _flags())
 
-        # Step 1 ran and failed
-        self.assertEqual(scratchpad.get(1).status, "failed")  # type: ignore[union-attr]
-        # Step 2 was skipped (transitive failed ancestor)
+        self.assertEqual(scratchpad.get(1).status, "failed")
+        self.assertEqual(scratchpad.get(2).status, "complete")
+        self.assertEqual(scratchpad.get(3).status, "skipped")
+
+    def test_single_ready_step_uses_single_dispatch(self):
+        s1 = _step(1)
+        s2 = _step(2, deps=[1])
+        plan = _plan(s1, s2)
+        scratchpad = Scratchpad(query="q")
+
+        with patch(
+            "src.core.executor.build_scoped_agent_for_step",
+            side_effect=lambda *, step, **_: _make_fake_agent(
+                step=step, result=_ok_result(step.id)
+            ),
+        ):
+            events = _drain_executor(plan, scratchpad, _flags())
+
+        self.assertEqual(scratchpad.get(1).status, "complete")
+        self.assertEqual(scratchpad.get(2).status, "complete")
+
+
+# ---------------------------------------------------------------------------
+# Failure handling
+# ---------------------------------------------------------------------------
+class FailureTests(unittest.TestCase):
+    def test_failed_step_marks_descendants_as_skipped(self):
+        s1 = _step(1, agent="research_agent")
+        s2 = _step(2, agent="filings_agent", deps=[1])
+        s3 = _step(3, agent="synthesizer", deps=[2])
+        plan = _plan(s1, s2, s3)
+        scratchpad = Scratchpad(query="q")
+
+        def fake_factory(*, step: PlanStep, **_kwargs):
+            if step.id == 1:
+                return _make_fake_agent(
+                    step=step, result=_failed_result(1, error="api timeout")
+                )
+            return _make_fake_agent(step=step, result=_ok_result(step.id))
+
+        with patch(
+            "src.core.executor.build_scoped_agent_for_step",
+            side_effect=fake_factory,
+        ):
+            events = _drain_executor(plan, scratchpad, _flags())
+
+        self.assertEqual(scratchpad.get(1).status, "failed")
         r2 = scratchpad.get(2)
         self.assertIsNotNone(r2)
-        self.assertEqual(r2.status, "skipped")  # type: ignore[union-attr]
-        # Step 3 also skipped
+        self.assertEqual(r2.status, "skipped")
         r3 = scratchpad.get(3)
         self.assertIsNotNone(r3)
-        self.assertEqual(r3.status, "skipped")  # type: ignore[union-attr]
+        self.assertEqual(r3.status, "skipped")
 
         statuses = [ev["text"] for ev in events if ev.get("type") == "_status"]
         self.assertTrue(any("Step 1 ✗ failed" in s for s in statuses))
         self.assertTrue(any("Step 2" in s and "skipped" in s for s in statuses))
 
     def test_construction_failure_marks_step_failed_and_continues(self):
-        # Two independent steps; step 1's factory raises ScopedAgentError,
-        # step 2 should still execute.
         s1 = _step(1)
         s2 = _step(2)
         plan = _plan(s1, s2)
@@ -250,36 +315,29 @@ class FailureTests(unittest.TestCase):
         ):
             events = _drain_executor(plan, scratchpad, _flags())
 
-        # Step 1 marked failed via construction
         r1 = scratchpad.get(1)
-        self.assertEqual(r1.status, "failed")  # type: ignore[union-attr]
-        self.assertIn("policy-gated", r1.error or "")  # type: ignore[union-attr]
-        self.assertEqual(r1.error_type, "ScopedAgentError")  # type: ignore[union-attr]
-        # Step 2 still ran successfully (it doesn't depend on step 1)
+        self.assertEqual(r1.status, "failed")
+        self.assertIn("policy-gated", r1.error or "")
+        self.assertEqual(r1.error_type, "ScopedAgentError")
         r2 = scratchpad.get(2)
-        self.assertEqual(r2.status, "complete")  # type: ignore[union-attr]
+        self.assertEqual(r2.status, "complete")
 
-        # Pipeline emitted an "error" event
         errors = [ev for ev in events if ev.get("type") == "error"]
         self.assertEqual(len(errors), 1)
         self.assertIn("Step 1 construction failed", errors[0]["text"])
 
-def test_run_exception_is_caught_as_failed(self):
-        # If ScopedAgent.run() itself raises (programming bug we don't
-        # catch in the wrapper), the executor's outer try/except in
-        # _run_one_step should turn it into a failed StepResult.
+    def test_run_exception_is_caught_as_failed(self):
         s1 = _step(1)
         plan = _plan(s1)
         scratchpad = Scratchpad(query="q")
 
-        async def _run_raises():
-            # Simulate an exception during the agent's run() - the executor's
-            # outer try/except in _run_one_step turns it into a failed
-            # StepResult with error type "RuntimeError".
-            raise RuntimeError("kaboom")
-
         fake_agent = MagicMock()
         fake_agent.step = s1
+
+        async def _run_raises():
+            raise RuntimeError("kaboom")
+            yield  # noqa: unreachable — makes this an async generator
+
         fake_agent.run = _run_raises
 
         with patch(
@@ -289,9 +347,9 @@ def test_run_exception_is_caught_as_failed(self):
             _drain_executor(plan, scratchpad, _flags())
 
         r = scratchpad.get(1)
-        self.assertEqual(r.status, "failed")  # type: ignore[union-attr]
-        self.assertEqual(r.error_type, "RuntimeError")  # type: ignore[union-attr]
-        self.assertIn("kaboom", r.error)  # type: ignore[union-attr]
+        self.assertEqual(r.status, "failed")
+        self.assertEqual(r.error_type, "RuntimeError")
+        self.assertIn("kaboom", r.error)
 
 
 if __name__ == "__main__":
