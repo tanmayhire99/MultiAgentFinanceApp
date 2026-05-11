@@ -1,7 +1,7 @@
-"""Pipeline — query → plan → execute → stream user-visible report.
+"""Pipeline — query → plan → execute → join → (replan loop) → stream report.
 
-This is the top-level coroutine that wires the Phase 1 / 2 / 3 / 5
-pieces of the planner-first architecture together:
+This is the top-level coroutine that wires the phases of the
+planner-first architecture together:
 
 1. **Phase 1** (already done by the dispatcher) — classifier emits
    ``intent_flags``.
@@ -10,17 +10,15 @@ pieces of the planner-first architecture together:
 3. **Phase 3** — :func:`src.core.executor.execute` runs each step
    via :class:`~src.core.agents._base.ScopedAgent`, populating the
    :class:`~src.core.types.Scratchpad`.
-4. **Phase 5** — the synthesizer step's ``StepResult.output["text"]``
+4. **Phase 4** — :func:`src.core.joiner.decide` inspects the scratchpad
+   and returns a :class:`~src.core.types.JoinDecision`. If the action
+   is ``replan``, additional steps are merged into the plan and Phase 3
+   re-enters. If ``finish``, we surface the synthesizer output. If
+   ``abort``, we emit an honest error.
+5. **Phase 5** — the synthesizer step's ``StepResult.output["text"]``
    is the user-visible markdown report. The pipeline streams it back
    in :class:`PanelEvent` form so the dispatcher / SSE renderer
    handle it identically to the static flows.
-
-We deliberately skip Phase 4 (the joiner / replan) in this v0. If
-the synthesizer step succeeded, we emit its output. If it failed
-or was skipped, we emit an honest error message. Replanning lives
-in the next iteration; the architecture supports it (every step
-result is in the scratchpad with ``status`` and ``error``), we just
-haven't wired the replan loop yet.
 
 PanelEvent shape
 ----------------
@@ -42,17 +40,14 @@ from langchain_core.tools import BaseTool
 
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.executor import execute as execute_plan
+from src.core.joiner import decide as joiner_decide
 from src.core.panel import PanelEvent
 from src.core.planner import PlannerError, plan as build_plan
-from src.core.types import Plan, Scratchpad, StepResult
-
+from src.core.types import ExecutionState, Plan, Scratchpad, StepResult
 
 log = logging.getLogger("finai.pipeline")
 
 
-# Default budget for the planner LLM call. Real models on NIM finish
-# well under this even with retries; the cap is so a stuck request
-# doesn't hold up the whole pipeline.
 DEFAULT_PLANNER_TIMEOUT = 45.0
 
 
@@ -63,6 +58,7 @@ async def run_pipeline(
     all_mcp_tools: Sequence[BaseTool],
     registry: AgentRegistry = REGISTRY,
     history_summary: Optional[str] = None,
+    max_replans: int = 2,
 ) -> AsyncIterator[PanelEvent]:
     """End-to-end planner-first pipeline for ``query``.
 
@@ -71,6 +67,11 @@ async def run_pipeline(
     into chat (or skips them when verbose_trace is off — though
     these are user-relevant progress, not dev-trace, so they always
     show).
+
+    After each executor run the joiner decides whether the results are
+    sufficient (``finish``), gaps need filling (``replan``), or we
+    should bail out (``abort``). On ``replan``, the additional steps
+    are merged into the plan and the executor re-enters Phase 3.
 
     Caller responsibilities:
 
@@ -109,21 +110,44 @@ async def run_pipeline(
         f"({_describe_plan_brief(plan_obj)})"
     )
 
-    # 2) Phase 3: Execute
+    # 2) Phase 3 + 4: Execute then join, looping on replan
     scratchpad = Scratchpad(query=query)
-    async for ev in execute_plan(
+    state = ExecutionState(
+        query=query,
         plan=plan_obj,
         scratchpad=scratchpad,
-        intent_flags=intent_flags,
-        all_mcp_tools=all_mcp_tools,
-        registry=registry,
-    ):
-        yield ev
+        max_replans=max_replans,
+    )
+
+    while True:
+        async for ev in execute_plan(
+            plan=state.plan,
+            scratchpad=state.scratchpad,
+            intent_flags=intent_flags,
+            all_mcp_tools=all_mcp_tools,
+            registry=registry,
+        ):
+            yield ev
+
+        decision = joiner_decide(state)
+
+        if decision.action == "finish":
+            break
+
+        if decision.action == "abort":
+            yield _status(f"Joiner: {decision.reasoning}")
+            yield _err(decision.reasoning)
+            return
+
+        if decision.action == "replan":
+            yield _status(f"Joiner: {decision.reasoning}")
+            for ns in decision.additional_steps:
+                state.plan.steps.append(ns)
+            state.replan_count += 1
+            continue
 
     # 3) Phase 5: Surface the synthesizer's output.
-    #    By convention the LAST synthesizer step's output is the
-    #    user-visible report. Find it.
-    synth_step = _find_synth_step(plan_obj)
+    synth_step = _find_synth_step(state.plan)
     if synth_step is None:
         yield _err(
             "Plan had no synthesizer step — the planner produced an "
@@ -132,7 +156,7 @@ async def run_pipeline(
         )
         return
 
-    synth_result = scratchpad.get(synth_step.id)
+    synth_result = state.scratchpad.get(synth_step.id)
     if synth_result is None:
         yield _err(
             f"Synthesizer step {synth_step.id} never ran — "
@@ -141,8 +165,6 @@ async def run_pipeline(
         return
 
     if synth_result.status != "complete":
-        # Surface what we have. Even a partial synthesizer output is
-        # better than nothing for the user.
         partial = (synth_result.output or {}).get("text", "") if isinstance(
             synth_result.output, dict
         ) else ""
@@ -155,9 +177,6 @@ async def run_pipeline(
         )
         return
 
-    # Happy path: emit the synthesizer's text. The dispatcher will
-    # decide whether to wrap it in :::artifact{}::: based on the
-    # decision["wants_artifact"] flag the user set.
     final_text = ""
     output = synth_result.output
     if isinstance(output, dict):
@@ -175,11 +194,13 @@ async def run_pipeline(
 
     yield {"type": "text", "text": final_text, "persona": "synthesizer"}
 
-    # Closing telemetry
     duration = time.time() - started
+    replan_info = ""
+    if state.replan_count > 0:
+        replan_info = f" ({state.replan_count} replan(s))"
     yield _status(
-        f"Pipeline complete: {len(plan_obj.steps)} step(s) in "
-        f"{duration:.1f}s"
+        f"Pipeline complete: {len(state.plan.steps)} step(s) in "
+        f"{duration:.1f}s{replan_info}"
     )
 
 
@@ -199,10 +220,6 @@ def _find_synth_step(plan: Plan) -> Optional[Any]:
     candidates = [s for s in plan.steps if s.agent == "synthesizer"]
     if not candidates:
         return None
-    # Sort by id descending, take the highest-id synthesizer step. By
-    # convention the planner always puts synthesizer last, but if a
-    # plan has multiple (e.g. an intermediate consolidation step), we
-    # pick the last as the user-visible one.
     return sorted(candidates, key=lambda s: -s.id)[0]
 
 

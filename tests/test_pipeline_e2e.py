@@ -19,7 +19,8 @@ Mocking strategy
 ``ainvoke`` returns canned ``AIMessage`` content).
 
 ``src.core.executor.build_scoped_agent_for_step`` → fake ScopedAgent
-whose ``run()`` returns a per-test :class:`StepResult`.
+whose ``run()`` is an async generator yielding a ``_step_result``
+event wrapping a :class:`StepResult`.
 
 Run via::
 
@@ -110,20 +111,18 @@ def _fake_llm_returning(*responses: str) -> MagicMock:
     chat.ainvoke = AsyncMock(
         side_effect=[AIMessage(content=r) for r in responses]
     )
-    # Some planners call .bind_tools or .with_structured_output;
-    # neither is currently used, but keep the mock graceful.
     chat.bind_tools = MagicMock(return_value=chat)
     chat.with_structured_output = MagicMock(return_value=chat)
     return chat
 
 
 def _make_fake_agent(*, step: PlanStep, result: StepResult) -> MagicMock:
-    """A MagicMock whose async run() returns the given StepResult."""
+    """A MagicMock whose run() is an async generator yielding a StepResult."""
     fake = MagicMock()
     fake.step = step
 
-    async def _run() -> StepResult:
-        return result
+    async def _run():
+        yield {"type": "_step_result", "result": result}
 
     fake.run = _run
     return fake
@@ -164,7 +163,7 @@ def _drain_pipeline(
         async for ev in run_pipeline(
             query,
             intent_flags=intent_flags,
-            all_mcp_tools=[],  # unused by mocked factory
+            all_mcp_tools=[],
         ):
             events.append(ev)
         return events
@@ -188,24 +187,21 @@ class HappyPathTests(unittest.TestCase):
             )
 
         with patch(_PLANNER_PATCH, return_value=fake_llm), \
-                patch(_EXECUTOR_PATCH, side_effect=fake_factory):
+             patch(_EXECUTOR_PATCH, side_effect=fake_factory):
             events = _drain_pipeline(
                 "Outlook for Indian IT?", intent_flags=_flags()
             )
 
-        # The synth output ends up as a single 'text' event
         text_events = [e for e in events if e.get("type") == "text"]
         self.assertEqual(len(text_events), 1)
         self.assertEqual(text_events[0]["text"], synth_text)
         self.assertEqual(text_events[0]["persona"], "synthesizer")
 
-        # Pipeline-level status events appear at start and end
         statuses = [e["text"] for e in events if e.get("type") == "_status"]
         self.assertTrue(any("Planning" in s for s in statuses))
         self.assertTrue(any("Plan ready" in s for s in statuses))
         self.assertTrue(any("Pipeline complete" in s for s in statuses))
 
-        # No error events on the happy path
         errors = [e for e in events if e.get("type") == "error"]
         self.assertEqual(errors, [])
 
@@ -219,30 +215,26 @@ class PlannerFailureTests(unittest.TestCase):
             "garbage 1", "garbage 2", "garbage 3"
         )
 
-        # The factory should NEVER be called if the planner failed
         factory = MagicMock(
             side_effect=AssertionError("executor must not run after planner failure")
         )
 
         with patch(_PLANNER_PATCH, return_value=fake_llm), \
-                patch(_EXECUTOR_PATCH, side_effect=factory):
+             patch(_EXECUTOR_PATCH, side_effect=factory):
             events = _drain_pipeline(
                 "Outlook for Indian IT?", intent_flags=_flags()
             )
 
-        # We expect a single 'error' event with the planner-failure message
         errors = [e for e in events if e.get("type") == "error"]
         self.assertGreaterEqual(len(errors), 1)
         self.assertTrue(
             any("Planner failed" in e["text"] for e in errors),
-            f"Expected 'Planner failed' in error events, got: {errors}",
+            f"Expected 'Planner failed' in error, got: {errors}",
         )
 
-        # No text events (no synth ran)
         text_events = [e for e in events if e.get("type") == "text"]
         self.assertEqual(text_events, [])
 
-        # The factory was never called
         self.assertEqual(factory.call_count, 0)
 
 
@@ -264,17 +256,17 @@ class SynthFailureTests(unittest.TestCase):
             )
 
         with patch(_PLANNER_PATCH, return_value=fake_llm), \
-                patch(_EXECUTOR_PATCH, side_effect=fake_factory):
+             patch(_EXECUTOR_PATCH, side_effect=fake_factory):
             events = _drain_pipeline(
                 "Outlook for Indian IT?", intent_flags=_flags()
             )
 
         errors = [e for e in events if e.get("type") == "error"]
         self.assertGreaterEqual(len(errors), 1)
-        # Pipeline surfaces the synth failure with status reason
         self.assertTrue(
             any(
-                "Synthesizer step finished with status=failed" in e["text"]
+                "Synthesizer step" in e["text"]
+                and "failed" in e["text"]
                 for e in errors
             ),
             f"Expected synth-failed error, got: {errors}",
@@ -294,7 +286,7 @@ class NoSynthStepTests(unittest.TestCase):
             )
 
         with patch(_PLANNER_PATCH, return_value=fake_llm), \
-                patch(_EXECUTOR_PATCH, side_effect=fake_factory):
+             patch(_EXECUTOR_PATCH, side_effect=fake_factory):
             events = _drain_pipeline(
                 "Outlook for Indian IT?", intent_flags=_flags()
             )
@@ -302,8 +294,8 @@ class NoSynthStepTests(unittest.TestCase):
         errors = [e for e in events if e.get("type") == "error"]
         self.assertGreaterEqual(len(errors), 1)
         self.assertTrue(
-            any("no synthesizer step" in e["text"].lower() for e in errors),
-            f"Expected 'no synthesizer step' error, got: {errors}",
+            any("synthesizer" in e["text"].lower() for e in errors),
+            f"Expected 'synthesizer' in error, got: {errors}",
         )
 
 

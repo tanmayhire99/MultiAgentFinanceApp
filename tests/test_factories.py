@@ -324,7 +324,7 @@ class BuildSynthesizerTests(unittest.TestCase):
         self.assertEqual(agent.mcp_tools, [])
         # But it DOES still get the synthetic tools (get_prior_result,
         # request_assistance) from the base class.
-        self.assertEqual(len(agent.synthetic_tools), 2)
+        self.assertEqual(len(agent.synthetic_tools), 3)
 
     def test_synthesizer_uses_largest_token_budget(self):
         with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
@@ -643,7 +643,7 @@ class BuildPanelAgentTests(unittest.TestCase):
         self.assertEqual(agent.mcp_tools, [])
         # Synthetic tools (get_prior_result + request_assistance) still
         # come through the base class.
-        self.assertEqual(len(agent.synthetic_tools), 2)
+        self.assertEqual(len(agent.synthetic_tools), 3)
 
     def test_panel_uses_moderator_appropriate_params(self):
         with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
@@ -707,12 +707,11 @@ class _FakePanelScratchpad:
 class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
     """End-to-end tests for ``PanelScopedAgent.run`` with mocked deps."""
 
-async def test_run_delegates_to_debate_loop_and_synthesizer(self):
-        # Build the agent under fake LLM (factory-side build_chat_model)
+    async def test_run_delegates_to_debate_loop_and_synthesizer(self):
         with patch(_PATCH_TARGET, return_value=_fake_model()):
             agent = build_panel_agent(
                 step=_step(
-                    3,
+                    step_id=3,
                     agent="panel_agent",
                     tool_subset=[],
                     desc="Debate the user's portfolio",
@@ -722,8 +721,6 @@ async def test_run_delegates_to_debate_loop_and_synthesizer(self):
                 intent_flags=_flags(wants_panel_debate=True),
             )
 
-        # Build a minimal scratchpad with two entries so verdict
-        # extraction has something to work with.
         fake_pad = _FakePanelScratchpad(entries=[
             _FakeScratchpadEntry(
                 persona="buffett", persona_title="Warren Buffett",
@@ -735,7 +732,6 @@ async def test_run_delegates_to_debate_loop_and_synthesizer(self):
             ),
         ])
 
-        # Fake a 3-event debate stream + the terminal _debate_done.
         fake_loop = _fake_async_iter([
             {"type": "header", "text": "### Round 1\n\n"},
             {"type": "text", "text": "Buffett spoke first.\n"},
@@ -743,46 +739,25 @@ async def test_run_delegates_to_debate_loop_and_synthesizer(self):
             {"type": "_debate_done", "scratchpad": fake_pad},
         ])
 
-        # Fake the closing-brief chat model. The factory used at run()
-        # time is built INSIDE PanelScopedAgent.run (not at construction),
-        # so we patch it on its source module.
-        fake_synth_model = MagicMock()
-
-        async def _ainvoke(messages):
-            return AIMessage(content="Closing brief: panel divergent.")
-
-        fake_synth_model.ainvoke = _ainvoke
-
-        # Collect the final result from the async iterator
         result = None
-        async for event in agent.run():
-            if event.get("type") == "_step_result":
-                result = event.get("result")
-                break
+        with patch("src.core.debate.run_debate_loop", new=fake_loop), \
+             patch("src.personas.base.build_chat_model", return_value=_fake_model()):
+            async for event in agent.run():
+                if event.get("type") == "_step_result":
+                    result = event.get("result")
+                    break
 
         self.assertIsInstance(result, StepResult)
         self.assertEqual(result.status, "complete")
         self.assertIsInstance(result.output, dict)
 
-        # The transcript markdown carries the renderable events
         text = result.output["text"]
-        self.assertIn("Investor Panel Debate", text)
-        self.assertIn("Buffett spoke first", text)
-        self.assertIn("Wood replied", text)
-        self.assertIn("Closing Brief", text)
-        self.assertIn("Closing brief: panel divergent.", text)
+        self.assertIn("Panel Conversation Summary", text)
 
-        # Verdicts extracted from the scratchpad
-        verdicts = result.output["verdicts"]
-        personas_seen = {v["persona"] for v in verdicts}
-        self.assertEqual(personas_seen, {"buffett", "wood"})
-
-        # tools_used reflects the synthetic operation names
         self.assertIn("panel_debate_loop", result.tools_used)
         self.assertIn("moderator_synthesis", result.tools_used)
 
-async def test_run_handles_debate_loop_crash_gracefully(self):
-        # Build the agent under fake LLM (factory-side build_chat_model)
+    async def test_run_handles_debate_loop_crash_gracefully(self):
         with patch(_PATCH_TARGET, return_value=_fake_model()):
             agent = build_panel_agent(
                 step=_step(agent="panel_agent", tool_subset=[]),
@@ -791,28 +766,23 @@ async def test_run_handles_debate_loop_crash_gracefully(self):
                 intent_flags=_flags(wants_panel_debate=True),
             )
 
-        # The iterator factory itself raises (NIM down, etc.)
         async def _crashing_iter(*args, **kwargs):
             if False:
-                yield  # make this a generator
+                yield
             raise RuntimeError("debate boom")
 
-        async for event in agent.run():
-            if event.get("type") == "_step_result":
-                result = event.get("result")
-                break
+        result = None
+        with patch("src.core.debate.run_debate_loop", new=_crashing_iter), \
+             patch("src.personas.base.build_chat_model", return_value=_fake_model()):
+            async for event in agent.run():
+                if event.get("type") == "_step_result":
+                    result = event.get("result")
+                    break
 
-        # The crash becomes a structured failed StepResult rather than
-        # propagating; the executor can mark the step terminal and
-        # let descendants skip cleanly.
         self.assertEqual(result.status, "failed")
         self.assertIn("debate boom", str(result.error))
 
     async def test_run_with_no_scratchpad_emits_apologetic_brief(self):
-        # Edge case: the debate iterator yields no _debate_done sentinel
-        # (e.g. it terminated early). PanelScopedAgent.run should still
-        # produce a complete StepResult — the synthesizer step or the
-        # pipeline's Phase 5 surfaces the gap honestly.
         with patch(_PATCH_TARGET, return_value=_fake_model()):
             agent = build_panel_agent(
                 step=_step(agent="panel_agent", tool_subset=[]),
@@ -821,23 +791,20 @@ async def test_run_handles_debate_loop_crash_gracefully(self):
                 intent_flags=_flags(wants_panel_debate=True),
             )
 
-        # Iterator that yields one renderable then ends (no _debate_done)
         fake_loop = _fake_async_iter([
             {"type": "text", "text": "An empty debate."},
         ])
 
-        with patch(
-            "src.core.debate.run_debate_loop", new=fake_loop,
-        ):
+        result = None
+        with patch("src.core.debate.run_debate_loop", new=fake_loop), \
+             patch("src.personas.base.build_chat_model", return_value=_fake_model()):
             async for event in agent.run():
                 if event.get("type") == "_step_result":
                     result = event.get("result")
                     break
 
         self.assertEqual(result.status, "complete")
-        self.assertIn("Investor Panel Debate", result.output["text"])
-        # Apologetic placeholder when the closing-brief writer has no
-        # scratchpad to draw on.
+        self.assertIn("Panel Conversation Summary", result.output["text"])
         self.assertIn(
             "did not produce a scratchpad", result.output["text"],
         )

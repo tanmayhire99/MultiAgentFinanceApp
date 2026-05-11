@@ -19,3 +19,8 @@ dependencies = [
 ]
 [tool.uv]
 environments = ['sys_platform == "linux"']
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
