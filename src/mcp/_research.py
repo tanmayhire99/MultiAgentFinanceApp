@@ -92,15 +92,29 @@ def _cache_check(kind: str, key: str) -> Optional[Any]:
 # ---------------------------------------------------------------------------
 # Backend availability
 # ---------------------------------------------------------------------------
+_TAVILY_CLIENT: Optional[Any] = None
+_TAVILY_INIT_ATTEMPTED: bool = False
+
+
 def _tavily_client() -> Optional[Any]:
+    global _TAVILY_CLIENT, _TAVILY_INIT_ATTEMPTED
+    if _TAVILY_INIT_ATTEMPTED:
+        return _TAVILY_CLIENT
+    _TAVILY_INIT_ATTEMPTED = True
     key = (os.getenv("TAVILY_API_KEY") or "").strip()
     if not key or TavilyClient is None:
+        log.info(
+            "Tavily not available: %s",
+            "no TAVILY_API_KEY" if not key else "tavily-python not installed",
+        )
         return None
     try:
-        return TavilyClient(api_key=key)
-    except Exception as e:  # pragma: no cover - defensive
+        _TAVILY_CLIENT = TavilyClient(api_key=key)
+        log.info("Tavily client initialised (key prefix: %s...)", key[:8])
+    except Exception as e: # pragma: no cover - defensive
         log.warning("Failed to construct Tavily client: %s", e)
-        return None
+        _TAVILY_CLIENT = None
+    return _TAVILY_CLIENT
 
 
 def is_tavily_available() -> bool:

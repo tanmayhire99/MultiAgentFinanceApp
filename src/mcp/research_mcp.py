@@ -822,5 +822,17 @@ def get_indian_annual_reports(ticker: str, limit: int = 6) -> Dict[str, Any]:
     }
 
 
-if __name__ == "__main__":  # pragma: no cover - entrypoint
+import logging as _logging
+
+_logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+_startup_log = _logging.getLogger("finai.research.mcp")
+_backends = _research.active_backends()
+_startup_log.info(
+    "Research MCP server starting — active search backends: %s  (tavily=%s, ddg=%s)",
+    _backends,
+    _research.is_tavily_available(),
+    _research.is_ddg_available(),
+)
+
+if __name__ == "__main__": # pragma: no cover - entrypoint
     mcp.run()
