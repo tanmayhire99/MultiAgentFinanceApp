@@ -289,57 +289,18 @@ def _format_snapshot_for_llm(ctx: PortfolioContext) -> str:
 
 # ---------------------------------------------------------------------------
 # With-panel branch: moderator + multi-round sequential debate + closing brief
+#
+# As of Day 4c, ``_DEBATE_SYNTH_SYSTEM`` (the moderator-synthesis system
+# prompt) and ``_format_scratchpad_for_moderator`` (the transcript
+# formatter) live in :mod:`src.core.agents.panel_agent` so the
+# planner-first ``PanelScopedAgent`` and this static flow share one
+# prompt. We import them here under their original names so the rest
+# of this module's code is unchanged.
 # ---------------------------------------------------------------------------
-_DEBATE_SYNTH_SYSTEM = (
-    "You are the moderator of the FinAI Investor Panel. The three "
-    "analyst personas have just completed a multi-round sequential "
-    "debate on the user's portfolio, with a shared scratchpad visible "
-    "to every speaker. Your job is to write the **Closing Brief** "
-    "section, grounded in both the live portfolio snapshot and the "
-    "full debate transcript you will be shown.\n\n"
-    "Follow this structure exactly:\n\n"
-    "**Where the panel converged:** 1-2 bullets on points the three "
-    "analysts now agree on. If the panel never converged, say so.\n"
-    "**Where the panel remained divergent:** 1-2 bullets naming who is "
-    "on each side and citing a specific claim from the transcript.\n"
-    "**How stances evolved:** 2-3 sentences summarising movements "
-    "across rounds. Call out any persona who shifted stance and the "
-    "argument that moved them.\n"
-    "**What it means for your portfolio:** 2-3 sentences connecting "
-    "the (resolved or persisting) disagreement back to specific "
-    "holdings or concentration flags from the snapshot.\n"
-    "**What to watch next:** 2-4 bullets with educational indicators "
-    "the user should monitor. No buy/sell calls, no price targets.\n\n"
-    "Rules:\n"
-    "- Aim for 260-380 words total.\n"
-    "- Cite panelists by name when referencing a claim.\n"
-    "- Quote specific numbers from the portfolio snapshot where useful.\n"
-    "- Do NOT invent new metrics.\n"
-    "- Do NOT include a caveat - a standalone disclaimer follows."
+from src.core.agents.panel_agent import (  # noqa: E402
+    _DEBATE_SYNTH_SYSTEM,
+    _format_scratchpad_for_moderator,
 )
-
-
-def _format_scratchpad_for_moderator(scratchpad: PanelScratchpad) -> str:
-    """Render the full debate transcript for the moderator synthesis prompt."""
-    lines: List[str] = [f"Query: {scratchpad.query}", ""]
-    rounds_used = sorted({e.round for e in scratchpad.entries})
-    for r in rounds_used:
-        lines.append(f"=== Round {r} ===")
-        for entry in scratchpad.entries_for_round(r):
-            lines.append(
-                f"\n### {entry.persona_title} — stance: {entry.stance} "
-                f"({entry.confidence} confidence)"
-            )
-            if entry.one_liner:
-                lines.append(f"One-liner: {entry.one_liner}")
-            if entry.content:
-                lines.append(entry.content)
-            lines.append("")
-    evolution = scratchpad.stance_evolution_md()
-    if evolution:
-        lines.append("Stance evolution:")
-        lines.append(evolution)
-    return "\n".join(lines)
 
 
 async def _run_panel_branch(

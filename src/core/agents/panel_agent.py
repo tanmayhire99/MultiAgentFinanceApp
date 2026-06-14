@@ -1,44 +1,54 @@
-"""``PanelScopedAgent`` — special-cased ScopedAgent for ``panel_agent``.
+"""Panel Agent — multi-round Buffett / Wood / Graham investor debate.
 
-The panel agent is qualitatively different from every other agent in
-the registry:
+The panel agent is qualitatively different from every other agent
+in the registry:
 
-* In the registry it owns **zero MCP tools** (``tools=()``). Its work
-  is done via three persona sub-agents (Buffett / Wood / Graham)
-  orchestrated by the existing :mod:`src.core.debate` and
-  :mod:`src.core.panel` modules.
+* In the registry it owns **zero MCP tools** (``tools=()``). Its
+  work is delegated to three persona sub-agents (Buffett / Wood /
+  Graham) orchestrated by :mod:`src.core.debate` and
+  :mod:`src.core.panel`.
 * It is **policy-gated** — the registry rejects any plan that names
   ``panel_agent`` unless the classifier set
   ``intent_flags["wants_panel_debate"] = True``.
 * Its ``run()`` is **NOT** a plain ReAct loop. The standard
-  :class:`ScopedAgent` base class would compile a ReAct graph with no
-  MCP tools and an empty system prompt — at best the LLM would emit a
-  dry one-shot answer; at worst it would hallucinate a panel by
-  inventing dialogue without invoking the actual personas.
+  :class:`ScopedAgent` base class would compile a ReAct graph with
+  no MCP tools and an empty system prompt — at best the LLM would
+  emit a dry one-shot answer; at worst it would hallucinate a panel
+  by inventing dialogue without invoking the actual personas.
 
 To preserve the architecture (ScopedAgent is the unit of execution
 the executor consumes) while delegating the actual debate to the
-existing machinery, we define :class:`PanelScopedAgent` as a subclass
-of :class:`ScopedAgent` that overrides :meth:`run`. The base
-constructor still runs (registry validation, policy gate, prompt
-assembly) so the agent shows up in tests and audit logs identically
-to any other ScopedAgent.
+existing machinery, this module defines :class:`PanelScopedAgent`
+as a subclass of :class:`ScopedAgent` that overrides :meth:`run`.
+The base constructor still runs (registry validation, policy gate,
+prompt assembly) so the agent shows up in tests and audit logs
+identically to any other ScopedAgent.
 
-What ``run()`` does
--------------------
-1. **Build a portfolio context.** Walks the step's declared
-   dependencies (``step.depends_on``). For each prior step that has a
-   completed result, attempt to extract:
+Self-contained
+--------------
+This module is the **single source of truth** for the moderator-
+synthesis prompt (``_DEBATE_SYNTH_SYSTEM``) and the scratchpad
+formatter (``_format_scratchpad_for_moderator``). The static panel
+flows in :mod:`src.core.flows.portfolio_analysis` and
+:mod:`src.core.flows.stock_research` import these from here, so the
+dependency direction is **flow-depends-on-agent** (good layering),
+not the reverse.
 
-   * holdings + summary + sector allocation + concentration risks +
-     diversification score (from a ``portfolio_agent`` step), OR
-   * per-ticker fundamentals (from ``us_stock_agent`` /
-     ``indian_stock_agent`` steps), and
-   * per-ticker catalysts / news (from a ``research_agent`` step).
+What ``PanelScopedAgent.run()`` does
+------------------------------------
+1. **Build a portfolio context.** Walks ``step.depends_on`` and
+   inspects each completed prior step's output. For:
 
-   If at least one source was found, populate a
-   :class:`~src.core.panel.PortfolioContext`. Otherwise the debate
-   runs ungrounded; that's a degraded mode but still valid.
+   * a ``portfolio_agent`` step → adopt its holdings / summary /
+     allocation / risks / score directly into a
+     :class:`~src.core.panel.PortfolioContext`.
+   * a ``us_stock_agent`` / ``indian_stock_agent`` step → record
+     its ``fundamentals`` / ``growth_metrics`` / ``defensive_metrics``
+     / ``moat_signals`` under the relevant ticker.
+   * a ``research_agent`` step → record any catalyst lists.
+
+   If at least one source was found, populate the context. Otherwise
+   the debate runs **ungrounded** (still valid; just less rich).
 
 2. **Run the multi-round sequential debate** via
    :func:`src.core.debate.run_debate_loop`. We drain the
@@ -49,9 +59,7 @@ What ``run()`` does
 
 3. **Synthesize the closing brief.** A single LLM call (moderator
    voice) over the transcript + portfolio context produces the
-   user-visible "Closing Brief" section. We reuse the system prompt
-   from :mod:`src.core.flows.portfolio_analysis` so output style
-   matches the existing static-flow path.
+   "Closing Brief" section using :data:`_DEBATE_SYNTH_SYSTEM`.
 
 4. **Return a** :class:`~src.core.types.StepResult` with the
    combined transcript + closing brief in ``output["text"]`` and
@@ -62,45 +70,64 @@ Failure modes are caught at the boundary of each phase: if the
 debate loop crashes we still return a ``failed`` StepResult so the
 executor can mark the step terminal and the synthesizer can either
 produce a partial report or surface an error.
-
-The Stage-4 build deliberately does the **minimum end-to-end**
-delivery: a panel can run from a planner-emitted plan even if the
-plan only hands the panel agent a query. Stage 5 refines:
-
-* the **dispatcher** so ``/planner panel ...`` queries actually
-  route through the new pipeline (they currently fail at the
-  factory layer in Stage 3);
-* the **planner's worked examples** so the LLM knows the canonical
-  shape of a "panel" plan (currently it has examples for stock
-  research and claim tracking only).
 """
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
 
-from src.core.agents._base import ScopedAgent
-from src.core.types import StepResult
-
-
-# ``build_panel_agent`` lives in :mod:`src.core.agents._factories` so it
-# shares the patched ``build_chat_model`` reference with every other
-# factory function (the test suite patches that single module-level
-# reference). This module exposes :class:`PanelScopedAgent` and the
-# :meth:`run` override; the factory there just chooses model params and
-# instantiates it.
+from src.agents.personas.base import build_chat_model
+from src.core.agents._base import DEFAULT_RECURSION_LIMIT, ScopedAgent
+from src.core.agents.registry import REGISTRY, AgentRegistry
+from src.core.types import PlanStep, Scratchpad, StepResult
 
 
 log = logging.getLogger("finai.panel_agent")
 
 
-# Reused verbatim so the planner-pipeline closing brief reads the same as
-# the existing static-flow path. Imported lazily inside ``run()`` to keep
-# this module's import graph cheap (no LangChain / persona machinery
-# pulled in just to compile the class).
+# ---------------------------------------------------------------------------
+# Moderator-synthesis prompt (single source of truth for ALL panel paths)
+# ---------------------------------------------------------------------------
+# The static portfolio_analysis / stock_research flows used to define this
+# inline. Day 4c moves it here so the planner-first PanelScopedAgent and the
+# static flows share one prompt — keeping output style consistent across
+# architectures.
+_DEBATE_SYNTH_SYSTEM = (
+    "You are the moderator of the FinAI Investor Panel. The three "
+    "analyst personas have just completed a multi-round sequential "
+    "debate on the user's portfolio, with a shared scratchpad visible "
+    "to every speaker. Your job is to write the **Closing Brief** "
+    "section, grounded in both the live portfolio snapshot and the "
+    "full debate transcript you will be shown.\n\n"
+    "Follow this structure exactly:\n\n"
+    "**Where the panel converged:** 1-2 bullets on points the three "
+    "analysts now agree on. If the panel never converged, say so.\n"
+    "**Where the panel remained divergent:** 1-2 bullets naming who is "
+    "on each side and citing a specific claim from the transcript.\n"
+    "**How stances evolved:** 2-3 sentences summarising movements "
+    "across rounds. Call out any persona who shifted stance and the "
+    "argument that moved them.\n"
+    "**What it means for your portfolio:** 2-3 sentences connecting "
+    "the (resolved or persisting) disagreement back to specific "
+    "holdings or concentration flags from the snapshot.\n"
+    "**What to watch next:** 2-4 bullets with educational indicators "
+    "the user should monitor. No buy/sell calls, no price targets.\n\n"
+    "Rules:\n"
+    "- Aim for 260-380 words total.\n"
+    "- Cite panelists by name when referencing a claim.\n"
+    "- Quote specific numbers from the portfolio snapshot where useful.\n"
+    "- Do NOT invent new metrics.\n"
+    "- Do NOT include a caveat - a standalone disclaimer follows."
+)
+
+
+# Fallback prompt used by ``PanelScopedAgent.run`` only if the import of
+# :data:`_DEBATE_SYNTH_SYSTEM` somehow fails (e.g. partial test stubs).
+# Identical-spirit but tighter so a fallback path stays under-budget.
 _DEBATE_SYNTH_SYSTEM_FALLBACK = (
     "You are the moderator of the FinAI Investor Panel. The three "
     "analyst personas have just completed a multi-round sequential "
@@ -113,6 +140,42 @@ _DEBATE_SYNTH_SYSTEM_FALLBACK = (
 )
 
 
+def _format_scratchpad_for_moderator(scratchpad: Any) -> str:
+    """Render the full debate transcript for the moderator synthesis prompt.
+
+    Single source of truth shared by :class:`PanelScopedAgent` (this
+    module) and the static panel flows in
+    :mod:`src.core.flows.portfolio_analysis` /
+    :mod:`src.core.flows.stock_research`.
+
+    ``scratchpad`` is duck-typed against
+    :class:`src.core.debate.PanelScratchpad` so this function can be
+    exercised in unit tests with a minimal stand-in.
+    """
+    lines: List[str] = [f"Query: {scratchpad.query}", ""]
+    rounds_used = sorted({e.round for e in scratchpad.entries})
+    for r in rounds_used:
+        lines.append(f"=== Round {r} ===")
+        for entry in scratchpad.entries_for_round(r):
+            lines.append(
+                f"\n### {entry.persona_title} — stance: {entry.stance} "
+                f"({entry.confidence} confidence)"
+            )
+            if entry.one_liner:
+                lines.append(f"One-liner: {entry.one_liner}")
+            if entry.content:
+                lines.append(entry.content)
+            lines.append("")
+    evolution = scratchpad.stance_evolution_md()
+    if evolution:
+        lines.append("Stance evolution:")
+        lines.append(evolution)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# PanelScopedAgent
+# ---------------------------------------------------------------------------
 class PanelScopedAgent(ScopedAgent):
     """ScopedAgent variant that orchestrates the multi-round panel debate.
 
@@ -131,15 +194,11 @@ class PanelScopedAgent(ScopedAgent):
         StepResult — never propagates to the executor.
         """
         started_at = time.time()
-        # Imports are local to keep the agents module's import graph
+        # Local imports so the agents package's import graph stays
         # cheap (the executor / planner / pipeline don't need to pull
         # debate.py into every test run that touches a ScopedAgent).
         try:
-            from src.agents.personas.base import build_chat_model
-            from src.core.debate import (
-                PanelScratchpad,
-                run_debate_loop,
-            )
+            from src.core.debate import run_debate_loop  # noqa: F401
             from src.core.panel import PortfolioContext
         except Exception as exc:  # pragma: no cover - import-time only
             log.exception("panel agent: failed to import debate machinery")
@@ -152,6 +211,7 @@ class PanelScopedAgent(ScopedAgent):
                 started_at=started_at,
                 completed_at=time.time(),
             )
+        from src.core.debate import run_debate_loop
 
         try:
             ctx = self._build_portfolio_context(PortfolioContext)
@@ -186,7 +246,6 @@ class PanelScopedAgent(ScopedAgent):
                 query=query,
                 portfolio_ctx=ctx,
                 scratchpad=scratchpad,
-                build_chat_model=build_chat_model,
             )
         except Exception as exc:
             log.exception("panel agent: closing-brief synthesis crashed")
@@ -367,26 +426,23 @@ class PanelScopedAgent(ScopedAgent):
         query: str,
         portfolio_ctx: Optional[Any],
         scratchpad: Any,
-        build_chat_model: Any,
     ) -> str:
-        """One-shot moderator synthesis over the full debate transcript."""
+        """One-shot moderator synthesis over the full debate transcript.
+
+        Uses the module-level :data:`_DEBATE_SYNTH_SYSTEM` and
+        :func:`_format_scratchpad_for_moderator` for prompt + transcript
+        formatting; the static panel flows import these same symbols
+        from this module so output style is consistent across paths.
+        """
         if scratchpad is None:
             return (
                 "_The debate did not produce a scratchpad; closing brief "
                 "skipped._"
             )
 
-        # Prefer the existing portfolio_analysis system prompt for
-        # style parity. Falls back to an inlined version if that
-        # module isn't importable (keeps tests light-weight).
         try:
-            from src.core.flows.portfolio_analysis import (
-                _DEBATE_SYNTH_SYSTEM,
-                _format_scratchpad_for_moderator,
-            )
-
-            synth_system = _DEBATE_SYNTH_SYSTEM
             transcript = _format_scratchpad_for_moderator(scratchpad)
+            synth_system = _DEBATE_SYNTH_SYSTEM
         except Exception:
             log.debug(
                 "panel agent: falling back to inline closing-brief prompt"
@@ -431,7 +487,7 @@ class PanelScopedAgent(ScopedAgent):
 
     @staticmethod
     def _format_scratchpad_inline(scratchpad: Any) -> str:
-        """Minimal scratchpad rendering when portfolio_analysis isn't available."""
+        """Minimal scratchpad rendering when the canonical formatter fails."""
         try:
             entries = list(getattr(scratchpad, "entries", []) or [])
         except Exception:
@@ -533,6 +589,51 @@ class PanelScopedAgent(ScopedAgent):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+def build_panel_agent(
+    *,
+    step: PlanStep,
+    scratchpad: Scratchpad,
+    all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None,
+    registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary",
+    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+) -> PanelScopedAgent:
+    """Build the special :class:`PanelScopedAgent`.
+
+    Model parameters match the moderator-synthesis call in the
+    static panel flows so output style is consistent across the
+    planner-first and static paths. The constructor's chat model is
+    largely **ceremonial** for a PanelScopedAgent because
+    :meth:`PanelScopedAgent.run` builds its own chat model for the
+    closing-brief LLM call (it does not run a ReAct loop). We still
+    pass one for parity with every other factory so a future
+    refactor that consolidates model selection has a sensible
+    starting point.
+    """
+    model = build_chat_model(
+        temperature=0.2,
+        max_tokens=1100,
+        streaming=True,
+        api_key_slot=api_key_slot,
+    )
+    return PanelScopedAgent(
+        step=step,
+        scratchpad=scratchpad,
+        all_mcp_tools=all_mcp_tools,
+        model=model,
+        registry=registry,
+        intent_flags=intent_flags,
+        recursion_limit=recursion_limit,
+    )
+
+
 __all__ = [
     "PanelScopedAgent",
+    "build_panel_agent",
+    "_DEBATE_SYNTH_SYSTEM",
+    "_format_scratchpad_for_moderator",
 ]

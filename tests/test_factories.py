@@ -39,6 +39,7 @@ Run via::
 from __future__ import annotations
 
 import unittest
+from contextlib import ExitStack, contextmanager
 from typing import List
 from unittest.mock import MagicMock, patch
 
@@ -57,20 +58,21 @@ class _BindableFakeModel(FakeMessagesListChatModel):
         return self
 
 
-from src.core.agents._factories import (
-    build_claim_agent,
-    build_filings_agent,
-    build_indian_stock_agent,
-    build_panel_agent,
-    build_portfolio_agent,
-    build_research_agent,
-    build_scoped_agent_for_step,
-    build_synthesizer,
-    build_us_stock_agent,
-)
+# Day 4c: agent-layer imports come from the per-agent files directly,
+# not from a single ``_factories`` module. Public re-exports through
+# ``src.core.agents`` would also work, but importing the leaf modules
+# keeps the test failure mode obvious if a per-agent file regresses.
 from src.core.agents._base import ScopedAgent, ScopedAgentError
-from src.core.agents._panel_agent import PanelScopedAgent
+from src.core.agents.claim_agent import build_claim_agent
+from src.core.agents.factory_dispatch import build_scoped_agent_for_step
+from src.core.agents.filings_agent import build_filings_agent
+from src.core.agents.indian_stock_agent import build_indian_stock_agent
+from src.core.agents.panel_agent import PanelScopedAgent, build_panel_agent
+from src.core.agents.portfolio_agent import build_portfolio_agent
 from src.core.agents.registry import REGISTRY
+from src.core.agents.research_agent import build_research_agent
+from src.core.agents.synthesizer import build_synthesizer
+from src.core.agents.us_stock_agent import build_us_stock_agent
 from src.core.types import KNOWN_INTENT_FLAGS, PlanStep, Scratchpad, StepResult
 
 
@@ -128,7 +130,41 @@ def _fake_model() -> _BindableFakeModel:
 
 
 # Convenience: every factory test patches build_chat_model to bypass NIM.
-_PATCH_TARGET = "src.core.agents._factories.build_chat_model"
+#
+# Day 4c split the old single ``_factories`` module into one file per
+# agent. Each per-agent module does ``from src.agents.personas.base
+# import build_chat_model``, binding the name into its OWN namespace, so
+# a mock must replace it in every module that calls it — patching the
+# original source module would not affect the already-imported names.
+_MODEL_PATCH_TARGETS = tuple(
+    f"src.core.agents.{_module}.build_chat_model"
+    for _module in (
+        "research_agent",
+        "us_stock_agent",
+        "indian_stock_agent",
+        "filings_agent",
+        "portfolio_agent",
+        "claim_agent",
+        "synthesizer",
+        "panel_agent",
+    )
+)
+
+
+@contextmanager
+def _patch_build_chat_model():
+    """Replace ``build_chat_model`` in every per-agent module with a fake.
+
+    Yields a single shared :class:`MagicMock` so call-site tests can
+    assert on the kwargs the factory passed (``temperature``,
+    ``max_tokens``, …). Each test builds exactly one agent type, so the
+    shared mock unambiguously captures that factory's single call.
+    """
+    mock = MagicMock(return_value=_fake_model())
+    with ExitStack() as stack:
+        for _target in _MODEL_PATCH_TARGETS:
+            stack.enter_context(patch(_target, mock))
+        yield mock
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +172,7 @@ _PATCH_TARGET = "src.core.agents._factories.build_chat_model"
 # ---------------------------------------------------------------------------
 class BuildResearchAgentTests(unittest.TestCase):
     def test_returns_a_scoped_agent_for_research_agent(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             agent = build_research_agent(
                 step=_step(
                     agent="research_agent",
@@ -163,7 +199,7 @@ class BuildResearchAgentTests(unittest.TestCase):
     def test_default_intent_flags_works_for_ungated_agent(self):
         # research_agent has no policy gate; an empty intent_flags dict
         # should still produce a working ScopedAgent.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_research_agent(
                 step=_step(
                     agent="research_agent",
@@ -181,7 +217,7 @@ class BuildResearchAgentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildFilingsAgentTests(unittest.TestCase):
     def test_picks_filings_tools_only(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_filings_agent(
                 step=_step(
                     agent="filings_agent",
@@ -198,7 +234,7 @@ class BuildFilingsAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.mcp_tools), 2)
 
     def test_uses_filings_appropriate_model_params(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_filings_agent(
                 step=_step(
                     agent="filings_agent",
@@ -219,7 +255,7 @@ class BuildFilingsAgentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildClaimAgentTests(unittest.TestCase):
     def test_blocked_when_intent_flag_false(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             with self.assertRaises(ScopedAgentError) as ctx:
                 build_claim_agent(
                     step=_step(
@@ -233,7 +269,7 @@ class BuildClaimAgentTests(unittest.TestCase):
         self.assertIn("policy-gated", str(ctx.exception))
 
     def test_blocked_when_intent_flag_missing(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             with self.assertRaises(ScopedAgentError):
                 build_claim_agent(
                     step=_step(
@@ -246,7 +282,7 @@ class BuildClaimAgentTests(unittest.TestCase):
                 )
 
     def test_allowed_when_intent_flag_true(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_claim_agent(
                 step=_step(
                     agent="claim_agent",
@@ -263,7 +299,7 @@ class BuildClaimAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.mcp_tools), 2)
 
     def test_uses_claim_appropriate_model_params(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_claim_agent(
                 step=_step(
                     agent="claim_agent",
@@ -284,7 +320,7 @@ class BuildClaimAgentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildSynthesizerTests(unittest.TestCase):
     def test_synthesizer_uses_custom_system_prompt(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_synthesizer(
                 step=_step(
                     agent="synthesizer",
@@ -310,7 +346,7 @@ class BuildSynthesizerTests(unittest.TestCase):
         self.assertIn("[1, 2]", prompt)
 
     def test_synthesizer_has_no_mcp_tools(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_synthesizer(
                 step=_step(
                     agent="synthesizer",
@@ -327,7 +363,7 @@ class BuildSynthesizerTests(unittest.TestCase):
         self.assertEqual(len(agent.synthetic_tools), 2)
 
     def test_synthesizer_uses_largest_token_budget(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_synthesizer(
                 step=_step(
                     agent="synthesizer",
@@ -344,7 +380,7 @@ class BuildSynthesizerTests(unittest.TestCase):
 
     def test_synthesizer_prompt_forbids_recommendations_and_disclaimers(self):
         # Hard rules in the prompt that protect the demo's compliance posture.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_synthesizer(
                 step=_step(agent="synthesizer", tool_subset=[]),
                 scratchpad=Scratchpad(query="x"),
@@ -362,7 +398,7 @@ class BuildSynthesizerTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class DispatcherTests(unittest.TestCase):
     def test_dispatches_to_research_agent(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_scoped_agent_for_step(
                 step=_step(
                     agent="research_agent",
@@ -377,7 +413,7 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn("ONE step of a larger plan", agent.system_prompt)
 
     def test_dispatches_to_synthesizer_with_override(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_scoped_agent_for_step(
                 step=_step(
                     agent="synthesizer",
@@ -395,7 +431,7 @@ class DispatcherTests(unittest.TestCase):
 
     def test_dispatches_to_filings_and_claim(self):
         # Quick sanity that all 4 stage-1 factories are wired.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             for agent_name, tool, flags in [
                 ("filings_agent", "research__get_sec_filings", _flags()),
                 (
@@ -451,7 +487,7 @@ class DispatcherTests(unittest.TestCase):
     def test_dispatcher_propagates_gate_failure(self):
         # claim_agent without the flag should propagate ScopedAgentError
         # from the underlying factory.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             with self.assertRaises(ScopedAgentError) as ctx:
                 build_scoped_agent_for_step(
                     step=_step(
@@ -470,7 +506,7 @@ class DispatcherTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildUsStockAgentTests(unittest.TestCase):
     def test_picks_us_stock_tools_only(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_us_stock_agent(
                 step=_step(
                     agent="us_stock_agent",
@@ -490,7 +526,7 @@ class BuildUsStockAgentTests(unittest.TestCase):
         self.assertIn("ONE step of a larger plan", agent.system_prompt)
 
     def test_uses_us_stock_appropriate_model_params(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_us_stock_agent(
                 step=_step(
                     agent="us_stock_agent",
@@ -509,7 +545,7 @@ class BuildUsStockAgentTests(unittest.TestCase):
     def test_us_stock_no_policy_gate(self):
         # us_stock_agent has no policy gate, so it constructs even with
         # an empty / None intent_flags dict.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_us_stock_agent(
                 step=_step(
                     agent="us_stock_agent",
@@ -524,7 +560,7 @@ class BuildUsStockAgentTests(unittest.TestCase):
 
 class BuildIndianStockAgentTests(unittest.TestCase):
     def test_picks_indian_stock_tools_only(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_indian_stock_agent(
                 step=_step(
                     agent="indian_stock_agent",
@@ -542,7 +578,7 @@ class BuildIndianStockAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.mcp_tools), 2)
 
     def test_indian_stock_uses_same_model_params_as_us(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_indian_stock_agent(
                 step=_step(
                     agent="indian_stock_agent",
@@ -562,7 +598,7 @@ class BuildIndianStockAgentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildPortfolioAgentTests(unittest.TestCase):
     def test_picks_portfolio_tools_only(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_portfolio_agent(
                 step=_step(
                     agent="portfolio_agent",
@@ -580,7 +616,7 @@ class BuildPortfolioAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.mcp_tools), 2)
 
     def test_uses_portfolio_appropriate_model_params(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_portfolio_agent(
                 step=_step(
                     agent="portfolio_agent",
@@ -602,7 +638,7 @@ class BuildPortfolioAgentTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class BuildPanelAgentTests(unittest.TestCase):
     def test_blocked_when_intent_flag_false(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             with self.assertRaises(ScopedAgentError) as ctx:
                 build_panel_agent(
                     step=_step(
@@ -616,7 +652,7 @@ class BuildPanelAgentTests(unittest.TestCase):
         self.assertIn("policy-gated", str(ctx.exception))
 
     def test_blocked_when_intent_flag_missing(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             with self.assertRaises(ScopedAgentError):
                 build_panel_agent(
                     step=_step(agent="panel_agent", tool_subset=[]),
@@ -626,7 +662,7 @@ class BuildPanelAgentTests(unittest.TestCase):
                 )
 
     def test_returns_panel_scoped_agent_when_flag_true(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_panel_agent(
                 step=_step(agent="panel_agent", tool_subset=[]),
                 scratchpad=Scratchpad(query="x"),
@@ -646,7 +682,7 @@ class BuildPanelAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.synthetic_tools), 2)
 
     def test_panel_uses_moderator_appropriate_params(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()) as mock_build:
+        with _patch_build_chat_model() as mock_build:
             build_panel_agent(
                 step=_step(agent="panel_agent", tool_subset=[]),
                 scratchpad=Scratchpad(query="x"),
@@ -709,7 +745,7 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_run_delegates_to_debate_loop_and_synthesizer(self):
         # Build the agent under fake LLM (factory-side build_chat_model)
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_panel_agent(
                 step=_step(
                     agent="panel_agent",
@@ -743,8 +779,10 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         ])
 
         # Fake the closing-brief chat model. The factory used at run()
-        # time is built INSIDE PanelScopedAgent.run (not at construction),
-        # so we patch it on its source module.
+        # time is built INSIDE PanelScopedAgent.run (not at construction).
+        # Day 4c imported build_chat_model into the panel_agent module's
+        # namespace, so patch it there — patching the personas.base source
+        # would not affect the already-imported name.
         fake_synth_model = MagicMock()
 
         async def _ainvoke(messages):
@@ -755,7 +793,7 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "src.core.debate.run_debate_loop", new=fake_loop,
         ), patch(
-            "src.agents.personas.base.build_chat_model",
+            "src.core.agents.panel_agent.build_chat_model",
             return_value=fake_synth_model,
         ):
             result = await agent.run()
@@ -782,7 +820,7 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("moderator_synthesis", result.tools_used)
 
     async def test_run_handles_debate_loop_crash_gracefully(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_panel_agent(
                 step=_step(
                     agent="panel_agent",
@@ -817,7 +855,7 @@ class PanelScopedAgentRunTests(unittest.IsolatedAsyncioTestCase):
         # (e.g. it terminated early). PanelScopedAgent.run should still
         # produce a complete StepResult — the synthesizer step or the
         # pipeline's Phase 5 surfaces the gap honestly.
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_panel_agent(
                 step=_step(agent="panel_agent", tool_subset=[]),
                 scratchpad=Scratchpad(query="anything"),
@@ -852,14 +890,14 @@ class CrossCuttingTests(unittest.TestCase):
         # Day 4b invariant: every agent in REGISTRY has a factory.
         # If a 9th agent is added to the registry without a matching
         # factory, this surfaces immediately.
-        from src.core.agents._factories import _FACTORY_MAP
+        from src.core.agents.factory_dispatch import _FACTORY_MAP
         self.assertEqual(
             set(_FACTORY_MAP.keys()),
             {a.name for a in REGISTRY},
         )
 
     def test_factory_map_has_exactly_eight_factories(self):
-        from src.core.agents._factories import _FACTORY_MAP
+        from src.core.agents.factory_dispatch import _FACTORY_MAP
         self.assertEqual(
             set(_FACTORY_MAP.keys()),
             {
@@ -875,7 +913,7 @@ class CrossCuttingTests(unittest.TestCase):
         )
 
     def test_factory_propagates_recursion_limit(self):
-        with patch(_PATCH_TARGET, return_value=_fake_model()):
+        with _patch_build_chat_model():
             agent = build_research_agent(
                 step=_step(
                     agent="research_agent",

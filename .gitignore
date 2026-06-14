@@ -9,7 +9,7 @@ yarn-error.log*
 # Python
 __pycache__/
 *.pyc
-.venv/
+.venv*/
 LibreChat/
 
 # OS / IDE

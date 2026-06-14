@@ -48,7 +48,7 @@ from langchain_core.tools import BaseTool
 
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.agents._base import ScopedAgentError
-from src.core.agents._factories import build_scoped_agent_for_step
+from src.core.agents.factory_dispatch import build_scoped_agent_for_step
 from src.core.panel import PanelEvent
 from src.core.types import Plan, PlanStep, Scratchpad, StepResult
 

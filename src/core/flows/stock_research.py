@@ -826,11 +826,11 @@ async def _run_panel_on_tickers(
     just before returning so the caller can include the stance one-liner
     in the inline chat summary.
     """
-    from src.core.debate import PanelScratchpad, run_debate_loop
-    from src.core.flows.portfolio_analysis import (
+    from src.core.agents.panel_agent import (
         _DEBATE_SYNTH_SYSTEM,
         _format_scratchpad_for_moderator,
     )
+    from src.core.debate import PanelScratchpad, run_debate_loop
 
     ctx = _synthetic_portfolio_ctx(gathered)
 
