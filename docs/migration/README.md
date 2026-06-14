@@ -59,7 +59,14 @@ architecture it covers.
 | 2 | [`migration/day-6-7-slice-engine`](DAY_6_7_SLICE_ENGINE.md) | ✅ planner + sequential DAG executor + pipeline orchestrator (28 tests) |
 | 3 | [`migration/day-10-claim-slice`](DAY_10_CLAIM_SLICE.md) | ✅ `/planner` opt-in dispatcher wiring; planner pipeline reachable end-to-end (20 tests) |
 | 4 | [`migration/day-4b-panel-factories`](DAY_4B_PANEL_FACTORIES.md) | ✅ Factories for the 4 panel-slice agents (us_stock / indian_stock / portfolio / panel + `PanelScopedAgent` subclass that drives the multi-round persona debate; 15 new tests, 204 total) |
-| 5 | `migration/day-10b-panel-slice` | `/planner` panel queries route through new pipeline |
+| 5 | [`migration/day-10b-panel-slice`](DAY_10B_PANEL_SLICE.md) | ✅ `/planner` panel queries route through the new pipeline; `panel_agent` is terminal and streams the debate live; pre-existing invalid planner-example enums fixed (5 new tests, 209 total) |
+
+> A refactor step, [`migration/day-4c-per-agent-files`](DAY_10B_PANEL_SLICE.md),
+> lands between Stage 4 and Stage 5: it splits the monolithic
+> `_factories.py` / `_panel_agent.py` into one file per agent
+> (`research_agent.py`, `us_stock_agent.py`, …, `panel_agent.py`) plus
+> `factory_dispatch.py`, and centralises the moderator-synthesis prompt
+> in `panel_agent.py`. No behaviour change; 204 tests stayed green.
 
 ## How to roll back
 
