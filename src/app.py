@@ -16,7 +16,7 @@ from typing import List, Literal, Optional
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -28,7 +28,9 @@ from .personas.base import (
 )
 from .mcp._fixtures import load_fixture
 from .config import mcp_servers
+from .core.auth import authenticate_request, get_jwt_secret, is_auth_enabled
 from .core.dispatcher import run_analysis
+from .core.ratelimit import create_limiter_from_env
 from .core.router import INTENTS
 from .core.streaming import collect_transcript, stream_openai_chunks
 
@@ -61,6 +63,8 @@ def _resolve_portfolio_user(requested: Optional[str]) -> str:
 
 load_dotenv(".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s: %(message)s")
+
+_rate_limiter = create_limiter_from_env()
 
 
 # ---------------------------------------------------------------------------
@@ -142,11 +146,23 @@ def _last_user_message(messages: List[ChatMessage]) -> str:
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(req: ChatCompletionRequest):
+async def chat_completions(req: ChatCompletionRequest, request: Request):
     user_message = _last_user_message(req.messages)
-    # Map whatever the caller sent in ``user`` (LibreChat session id,
-    # "anonymous", None, ...) to an actual portfolio fixture user.
-    user_id = _resolve_portfolio_user(req.user)
+    auth = authenticate_request(
+        dict(request.headers),
+        fallback_user=req.user,
+    )
+    if not auth.authenticated and is_auth_enabled():
+        raise HTTPException(status_code=401, detail=auth.error or "Unauthorized")
+    raw_user = auth.user_id if auth.authenticated else req.user
+    user_id = _resolve_portfolio_user(raw_user)
+    rl = _rate_limiter.check(user_id)
+    if not rl.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded for user '{user_id}'",
+            headers={"Retry-After": str(rl.retry_after_seconds or 1)},
+        )
     # Forward the full conversation history so the intent router can
     # chain follow-ups ("do panel analysis as well", "what about P/E?")
     # onto the previous turn's classification card.
@@ -232,6 +248,10 @@ async def root():
             "(research, portfolio, filings, panel, synthesizer). "
             "fast-path intents (smalltalk, meta_help) skip the planner."
         ),
+        "auth": {
+            "enabled": is_auth_enabled(),
+            "jwt_configured": get_jwt_secret() is not None,
+        },
         "router": {
             "intents": list(INTENTS),
             "classifier_model": DEFAULT_MODEL,
@@ -247,7 +267,6 @@ async def root():
             "model": DEFAULT_MODEL,
         },
         "api_keys": {
-            # Do NOT expose key material; just show which slots are populated.
             "configured_slots": list_configured_slots(),
             "persona_slot_assignments": PERSONA_API_KEY_SLOT,
         },
@@ -265,12 +284,23 @@ async def root():
 # Legacy endpoint kept for backwards compatibility with HOW_TO_RUN.md
 # ---------------------------------------------------------------------------
 @app.post("/query")
-async def query_entry(body: QueryRequest):
+async def query_entry(body: QueryRequest, request: Request):
     """Legacy endpoint: runs the panel and returns the full transcript once.
 
     Retained for backwards compatibility with the old documentation; new
     clients should prefer ``/v1/chat/completions``.
     """
+    auth = authenticate_request(dict(request.headers))
+    if not auth.authenticated and is_auth_enabled():
+        raise HTTPException(status_code=401, detail=auth.error or "Unauthorized")
+    rl_user = auth.user_id if auth.authenticated else "anonymous"
+    rl = _rate_limiter.check(rl_user)
+    if not rl.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded",
+            headers={"Retry-After": str(rl.retry_after_seconds or 1)},
+        )
     events = run_analysis(body.query)
     transcript = await collect_transcript(events)
     return {

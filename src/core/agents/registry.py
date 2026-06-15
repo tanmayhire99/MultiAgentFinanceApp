@@ -419,7 +419,7 @@ class AgentRegistry:
 # ---------------------------------------------------------------------------
 # Tool names match the namespaced output of ``mcp_servers.get_tools()`` as of
 # 2026-04-25. Total tool count = 34 across 8 agents (verified by tests). When
-# a tool is added or removed in src/agents/workers/*, update its entry here
+# a tool is added or removed in src/mcp/*, update its entry here
 # AND bump src/config/mcp_servers.py's ``known_counts``.
 # ---------------------------------------------------------------------------
 RESEARCH_AGENT = AgentDefinition(

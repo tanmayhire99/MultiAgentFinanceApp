@@ -32,6 +32,14 @@ try:
 except ImportError:  # pragma: no cover - guarded at runtime
     DDGS = None  # type: ignore
 
+from ._retrieval import (
+    filter_by_date_window,
+    filter_by_freshness,
+    is_reranking_available,
+    process_items,
+    semantic_rerank,
+    deduplicate,
+)
 
 log = logging.getLogger("finai.research")
 
@@ -275,6 +283,43 @@ def _ddg_news(query: str, *, max_results: int = 5) -> Optional[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Post-processing pipeline (semantic re-rank, dedup, freshness)
+# ---------------------------------------------------------------------------
+def _post_process(
+    resp: Dict[str, Any],
+    query: str,
+    *,
+    rerank: bool = True,
+    dedup: bool = True,
+    freshness: bool = False,
+    date_window: Optional[tuple] = None,
+    min_year: int = 2020,
+) -> Dict[str, Any]:
+    """Apply retrieval post-processing to a search result dict.
+
+    Mutates ``resp["items"]`` in place and attaches ``retrieval_stats``.
+    Skips everything gracefully if sentence-transformers is not installed.
+    """
+    items = resp.get("items") or []
+    if not items:
+        resp["retrieval_stats"] = {"initial": 0}
+        return resp
+
+    processed, stats = process_items(
+        items,
+        query,
+        rerank=rerank,
+        dedup=dedup,
+        freshness=freshness,
+        date_window=date_window,
+        min_year=min_year,
+    )
+    resp["items"] = processed
+    resp["retrieval_stats"] = stats.to_dict()
+    return resp
+
+
+# ---------------------------------------------------------------------------
 # Public helpers (cached, backend-ordered)
 # ---------------------------------------------------------------------------
 def search_news(ticker: str, max_items: int = 3) -> Optional[Dict[str, Any]]:
@@ -285,7 +330,6 @@ def search_news(ticker: str, max_items: int = 3) -> Optional[Dict[str, Any]]:
         return hit
 
     ticker = ticker.upper()
-    # Trim any Yahoo suffix (".NS", ".BO") so searches look natural.
     plain_ticker = ticker.replace(".NS", "").replace(".BO", "")
     query = f"{plain_ticker} stock news latest"
 
@@ -296,6 +340,7 @@ def search_news(ticker: str, max_items: int = 3) -> Optional[Dict[str, Any]]:
         resp = _ddg_news(query, max_results=max_items)
 
     if resp is not None:
+        resp = _post_process(resp, query, freshness=True, min_year=2020)
         _CACHE[key] = resp
     return resp
 
@@ -364,17 +409,26 @@ def search_historical_news(
                 end_date=end_date,
             )
     if (resp is None or not resp.get("items")) and is_ddg_available():
-        # DDG has no date filter; we annotate the result so the caller
-        # knows the window isn't enforced.
         resp = _ddg_news(f"{query} {start_date[:4]}", max_results=max_items)
         if resp is not None:
             resp["window"] = {
                 "start_date": start_date,
                 "end_date": end_date,
-                "enforced": False,  # DDG can't honour these
+                "enforced": False,
             }
 
     if resp is not None:
+        ddg_fallback = resp.get("backend") == "duckduckgo"
+        resp = _post_process(
+            resp,
+            query,
+            freshness=True,
+            date_window=(start_date, end_date) if ddg_fallback else None,
+            min_year=int(start_date[:4]) if len(start_date) >= 4 else 2020,
+        )
+        w = resp.get("window")
+        if w and w.get("enforced") is False and len(resp.get("items") or []) > 0:
+            w["enforced_after_post_process"] = True
         _CACHE[cache_key] = resp
     return resp
 
@@ -393,6 +447,7 @@ def search_web(query: str, max_items: int = 5) -> Optional[Dict[str, Any]]:
         resp = _ddg_text(query, max_results=max_items)
 
     if resp is not None:
+        resp = _post_process(resp, query, freshness=True, min_year=2020)
         _CACHE[key] = resp
     return resp
 
@@ -424,7 +479,8 @@ def company_brief(ticker: str) -> Optional[Dict[str, Any]]:
     if resp is None:
         return None
 
-    # Compose summary
+    resp = _post_process(resp, query)
+
     summary = resp.get("answer")
     if not summary:
         # Fall back to concatenating the first 2 snippets

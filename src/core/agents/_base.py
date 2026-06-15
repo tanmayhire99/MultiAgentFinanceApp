@@ -175,6 +175,7 @@ class ScopedAgent:
         intent_flags: Optional[Dict[str, bool]] = None,
         recursion_limit: int = DEFAULT_RECURSION_LIMIT,
         system_prompt_override: Optional[str] = None,
+        user_id: str = "demo",
     ) -> None:
         """Build a ScopedAgent for a single ``step`` of a plan.
 
@@ -192,6 +193,7 @@ class ScopedAgent:
         self.intent_flags: Dict[str, bool] = dict(intent_flags or {})
         self.recursion_limit = recursion_limit
         self.model = model
+        self.user_id = user_id
 
         # 1) Validate the step against the registry. The executor SHOULD
         #    have done this already, but we re-check here so a
@@ -534,6 +536,10 @@ class ScopedAgent:
         agent = self.agent_def
         # NOTE: the doubled curly braces in ``f"{{...}}"`` would trip an f-string;
         # we deliberately use plain str.format here for clarity instead.
+        if self.user_id and self.user_id != "demo":
+            user_line = f"### Authenticated user\nuser_id: `{self.user_id}` — pass this as the `user_id` argument to any portfolio tool calls.\n\n"
+        else:
+            user_line = ""
         return (
             f"You are the **{agent.title}** ({agent.name}) running step "
             f"{self.step.id} of a multi-agent investigation.\n\n"
@@ -556,6 +562,7 @@ class ScopedAgent:
             "`request_assistance(target_agent, reason)` to record a note "
             "for the orchestrator. **Do NOT try to do another agent's "
             "job yourself.**\n\n"
+            f"{user_line}"
             "### Agent directory (situational awareness only)\n"
             "These are the OTHER agents in the system. You CANNOT call "
             "them directly - knowing what they do helps you decide when "

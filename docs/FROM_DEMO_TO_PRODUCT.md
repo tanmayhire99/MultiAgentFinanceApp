@@ -5,8 +5,8 @@ upstream-verified citations needed to defend the architecture choices.
 
 > **TL;DR (one paragraph).** Your current demo is genuinely ahead of what most
 > 2024-2025 academic papers describe (real multi-agent debate loop, working
-> claim-tracking pipeline, SEC + BSE + Screener + NSE coverage, deep-agent
-> harness). Turning it into a product means closing four gaps the literature
+> claim-tracking pipeline, SEC + BSE + Screener + NSE coverage, planner-first
+> deep-research pipeline with replan loop). Turning it into a product means closing four gaps the literature
 > identifies as critical: persistent **memory**, reliable **numerical reasoning**,
 > domain-fine-tuned **models**, and **persona fidelity**. The recommended path:
 > build an Indian-native financial LLM ("Ganga-LLM"), layer fine-tuned investor
@@ -17,7 +17,7 @@ upstream-verified citations needed to defend the architecture choices.
 
 ---
 
-## Strategic decisions made (2026-04)
+## Strategic decisions made (2026-04, updated 2026-05)
 
 These are the four product directions chosen at the end of the research:
 
@@ -123,23 +123,31 @@ the "investor panel" UX. That's the product-market fit slice worth pursuing.
 What the demo does well:
 
 - Multi-agent debate with convergence detection (matches FinCon / TradingAgents architecture)
-- Intent routing + 5 specialised flows
+- Planner-first pipeline: LLM planner generates DAG of ScopedAgent steps, executor runs independent steps in parallel, joiner decides finish/replan/abort
 - Claim-tracking pipeline with SEC EDGAR + BSE + Screener + NSE + PDF extraction
-- deepagents-based batch research with working 2-10 minute runs
+- Retrieval post-processing: semantic re-ranking (all-MiniLM-L6-v2), dedup (cosine θ=0.90), freshness filtering, date-window filtering — wired into all search functions
+- `run_python` synthetic tool — any agent can execute verified Python
+- API key cycling via `_CyclingChatOpenAI` — transparent rotation on rate-limit
+- Search backend chain: Tavily (agent-optimized) → DDG (free) → fixture, with Tavily singleton client + negative caching
 - LibreChat-compatible SSE streaming UI
+- FinBen baseline: 71.1% overall (professional_accounting 26.7%, econometrics 60%)
 
 What it lacks vs a real product:
 
 - **No persistent user memory.** Every session is cold. No idea who the user is between runs.
 - **No personalised risk profile.** Buffett / Wood / Graham give the same advice to a 25-year-old engineer as to a 55-year-old retiree.
-- **Numerical reasoning is weak.** Calculations happen inside the LLM prompt, not in verified Python. This is the QRData problem.
+- **Numerical reasoning is weak.** `run_python` synthetic tool ships (any agent can execute verified Python), but no `verify_numbers` post-processing pass yet — the synthesizer still renders unchecked LLM-computed numbers. This is the QRData problem.
 - **No learning loop.** The system doesn't improve from its past verdicts.
-- **No real evaluation.** No way to know if TCS claim-tracking is better than a 10-person Morningstar team at 10% of the cost.
+- **No real evaluation.** FinBen baseline recorded (71.1% overall), but no CI gate blocks regressions on model/prompt changes.
 - **No regulatory framing.** Zero visible SEBI/SEC disclaimers, no compliance audit trail, no "this is not advice" enforcement beyond a footer.
 - **No multi-modal output.** Everything is markdown text. No dashboards, charts, alerts, voice, scheduled reports, or PDF exports.
 - **No broker / portfolio-sync integration.** Portfolio is a static fixture.
 - **No real-time events.** Agents react to what the user asks, not to what's happening in the market.
 - **Personas are system-prompted, not fine-tuned.** Buffett's language is generic "value investor" talk, not his actual writing style.
+- **No API authentication.** Endpoints are open — no auth, no rate limiting, CORS allows all origins.
+- **No per-step timeout.** A stuck agent blocks the entire pipeline indefinitely.
+- **No cache eviction.** Disk-backed response cache grows without bound.
+- **Python version mismatch.** Dockerfile=3.11, pyproject.toml=3.12, conda=3.13 — must pin to 3.12 everywhere.
 
 ## 5. The persona fine-tuning question — yes, and here's how
 
@@ -242,9 +250,7 @@ approved "suitability" check.
 
 ### 3. Hybrid numerical reasoning [QRData, FinBen]
 
-**What**: Every numeric claim the LLM makes gets verified in Python. Create a
-`verify_numbers_in_text(draft_text, known_data)` tool that the final moderator
-synthesis calls before rendering. Catches hallucinated numbers.
+**What**: Every numeric claim the LLM makes gets verified in Python. The `run_python` synthetic tool is shipped (agents can execute code), but the `verify_numbers_in_text(draft_text, known_data)` post-processing pass that the synthesizer calls before rendering is not yet implemented. Catches hallucinated numbers.
 
 **Why**: GPT-4 only gets 58% on QRData. Cannot ship a financial product that
 hallucinates numbers.
@@ -341,13 +347,15 @@ viable; you have the distribution.
 │  FastAPI · Auth (OAuth + SAML) · Rate-limit · Compliance Interceptor     │
 └──────────────────────────────┬───────────────────────────────────────────┘
                                │
-┌────── ORCHESTRATION (LangGraph + deepagents) ────────────────────────────┐
-│  • Intent Router (existing) → Flow Selector                              │
-│  • Persistent User Context (memory store + preferences + portfolio)      │
-│  • Risk-Profile-Aware Moderator                                          │
-│  • Deep Research / Panel / Quick / Educational (existing flows)          │
-│  • NEW: Event-Driven Agent (watchers on SEC 8-K, BSE Reg 30, news)       │
-│  • NEW: Scheduled Runner (cron + Celery)                                 │
+┌────── ORCHESTRATION (LangGraph + planner-first pipeline) ─────────────────┐
+│ • Intent Router (existing) → Planner → DAG of ScopedAgent steps │
+│ • Joiner (rule-based v0) → finish / replan / abort (max_replans=2) │
+│ • Persistent User Context (memory store + preferences + portfolio) │
+│ • Risk-Profile-Aware Moderator │
+│ • Deep Research / Panel / Quick / Educational (via planner DAG) │
+│ • Parallel step execution + replan on synth failure │
+│ • NEW: Event-Driven Agent (watchers on SEC 8-K, BSE Reg 30, news) │
+│ • NEW: Scheduled Runner (cron + Celery) │
 └──────┬───────────────────────────────────────────────────────────────────┘
        │
 ┌──── AGENT POOL ──────────────────────────────────────────────────────────┐
@@ -358,9 +366,11 @@ viable; you have the distribution.
 ┌──── TOOL POOL (via MCP) ─────────────────────────────────────────────────┐
 │  • Market data: yfinance, Polygon, Alpha Vantage, Alpha Vantage India    │
 │  • Filings: SEC EDGAR (existing), BSE (existing), NSE (existing)         │
-│  • Research: Tavily, DDG, Screener.in (existing)                         │
-│  • Claim tools: extract, compare (existing)                              │
-│  • NEW: Python sandbox for verified numerical reasoning                  │
+│ • Research: Tavily, DDG, Screener.in (existing) │
+│ • Retrieval pipeline: re-rank + dedup + freshness + date-window (shipped) │
+│ • Claim tools: extract, compare (existing) │
+│ • Retrieval pipeline: semantic re-ranking + dedup + freshness + date-window (shipped) │
+│ • NEW: Python sandbox for verified numerical reasoning (`run_python` shipped) │
 │  • NEW: Backtester (historical prices + strategy runner)                 │
 │  • NEW: Broker read (Zerodha, Upstox, Robinhood, Schwab OAuth)           │
 │  • NEW: Alerts (email, WhatsApp via Twilio, Slack, push)                 │
@@ -426,7 +436,7 @@ viable; you have the distribution.
 6. **Broker integrations** — each OAuth+data mapping is 1-2 months and a
    business-dev investment.
 
-Weakest moats: the LLM orchestration, the deep-agent framework, the MCP
+Weakest moats: the LLM orchestration, the planner-first pipeline, the MCP
 tooling — all open-source commodities. Don't rely on these as moats.
 
 ---
@@ -456,14 +466,14 @@ Plutus used much less for Greek and got publishable results. For India-focused,
 
 | Source | Volume estimate | Acquisition |
 |---|---|---|
-| **BSE corporate filings 2010-2025** (announcements + Q-results + audited annuals) | ~8B tokens | Scrape via existing `_indian_filings.py` + extend back to 2010 |
+| **BSE corporate filings 2010-2025** (announcements + Q-results + audited annuals) | ~8B tokens | Scrape via `src/mcp/_indian_filings.py` + extend back to 2010 |
 | **NSE corporate filings** (overlap with BSE but unique press releases) | ~3B tokens | curl_cffi-based scraper (existing pattern) |
 | **Concall transcripts 2014-2025** (top 500 NSE companies × ~40 quarters) | ~5B tokens | Screener.in scrape + IR-page direct + Motley Fool India |
 | **Annual Reports 2010-2025** (top 1000 NSE × 15 years × 250pp) | ~12B tokens | BSE-hosted PDFs via `fetch_pdf_text` (existing) |
 | **Indian business media** (Moneycontrol, Livemint, Economic Times, Business Standard, Mint, BloombergQuint) 2015-2025 | ~10B tokens | Crawl via Common Crawl + targeted scrapers; check robots.txt |
 | **SEBI consultation papers + circulars + orders** | ~1B tokens | sebi.gov.in (free, public) |
 | **MCA filings + judgements** | ~2B tokens | mca.gov.in scrape + court records |
-| **US SEC filings 2015-2025** (for cross-market comparability of Indian ADRs + global names) | ~5B tokens | Existing `_sec_edgar.py` + bulk SEC EDGAR archive download |
+| **US SEC filings 2015-2025** (for cross-market comparability of Indian ADRs + global names) | ~5B tokens | `src/mcp/_sec_edgar.py` + bulk SEC EDGAR archive download |
 | **Buffett / Graham / Marks / Lynch source corpus** (for persona LoRAs, NOT the base) | ~50M tokens | Berkshire letters + Oaktree memos + scanned books |
 | **CFA curriculum + Indian textbooks (NISM, ICSI)** | ~2B tokens | Some free PDFs; some require licensing |
 | **Reddit r/IndianStockMarket / r/IndiaInvestments + Twitter financial India** | ~3B tokens | Pushshift + Twitter scrape (note: ToS) |
@@ -582,12 +592,12 @@ engineers + product lead.
 |---|---|---|
 | 1 | Data pipeline scaffold | Indian-corpus ingest crew: BSE archive 2010+, NSE archive, Annual Reports back to 2010 |
 | 2 | Data pipeline (cont.) | Concall transcripts crawler (Screener + Motley Fool India) |
-| 3 | FinBen wiring | Run baseline on gpt-oss-120b, publish internal scorecard |
+| 3 | FinBen wiring | Run baseline on gpt-oss-120b, publish internal scorecard (**baseline recorded: 71.1% overall**; wire as CI gate next) |
 | 4 | User auth + memory v1 | Auth (Clerk/Supabase), per-user portfolio + preferences in PG, vector store for chat memory |
 | 5 | Persona dataset construction | Berkshire letters → ~5000 instruction pairs synthesised via Claude |
 | 6 | Persona LoRA training (first attempt) | Buffett LoRA on gpt-oss-120b via Unsloth on rented H100 |
 | 7 | Persona fidelity benchmark | Set up 50-question eval, 3 raters; compare system-prompted vs LoRA Buffett |
-| 8 | Hybrid numerical reasoning | Python sandbox MCP tool; verify-numbers post-processing pass |
+| 8 | Hybrid numerical reasoning | `verify_numbers` post-processing pass (`run_python` tool already shipped) |
 | 9 | Alerts ingest layer | BSE/NSE/SEC poll loops + classifier prompt |
 | 10 | Alerts user matching | Per-user holdings table, alert preferences, cool-downs |
 | 11 | Alerts summarizer + delivery | WhatsApp/email/push integration; first end-to-end alert delivered |
@@ -615,7 +625,7 @@ That's a credible 90-day product story.
 | **SEBI compliance friction (research analyst registration, advice vs education)** | High | Engage SEBI-compliant counsel by week 4. Start as "educational" tier; register as Investment Adviser when revenue justifies (~₹5L/yr threshold) |
 | **Persona copyright / IP claims (esp. ARK, Buffett)** | Medium | Frame as "value investor inspired by ___"; avoid direct quotes longer than fair-use snippets in outputs; train on summaries rather than direct text where possible |
 | **Compute cost overruns** | Medium | Run a small test (LLaMA-3.1-8B continue-pretrained on 5B tokens, $5-10k) to validate the recipe before committing to 70B |
-| **Hallucinated numbers in production** | High → Low (post-mitigation) | Hybrid numerical reasoning ships in Q2 (week 8). Block all numerical claims from rendering until the Python verifier confirms them |
+| **Hallucinated numbers in production** | High → Medium (post-mitigation) | `run_python` tool shipped (agents can compute in Python). Still need: `verify_numbers` post-processing pass that blocks rendering of unchecked numerical claims (Q2, week 8) |
 | **Indian retail isn't actually willing to pay** | High | Validate in beta: does ₹500-2000/mo retain 30%+ at month 3? If not, pivot to B2B2C white-label |
 | **Bigger players notice and clone** | Medium | The Indian-corpus moat is real (12-18 month lead). The persona-fidelity benchmark moat is real. The compliance certification moat is real. Move fast on these. |
 
@@ -732,17 +742,71 @@ April 2026.
 
 What's already built that supports this plan:
 
-- `src/agents/workers/_sec_edgar.py` — US filings ingest, ready for the
+- `src/mcp/_sec_edgar.py` — US filings ingest, ready for the
   SEC corpus chunk
-- `src/agents/workers/_indian_filings.py` — BSE + NSE + Screener.in scraper;
+- `src/mcp/_indian_filings.py` — BSE + NSE + Screener.in scraper;
   the foundation of the Indian corpus pipeline
-- `src/agents/workers/_claims.py` — claim extraction + comparison; reusable
+- `src/mcp/_claims.py` — claim extraction + comparison; reusable
   in the alerts summarizer
-- `src/core/flows/deep_stock_research.py` — deepagents-based deep research;
-  reusable as the per-event re-research engine
-- `src/core/router.py` + `src/core/dispatcher.py` — intent routing; extends
-  to support an `event_alert` flow
+- `src/core/flows/planner_pipeline.py` — planner-first pipeline;
+  generates DAG of ScopedAgent steps per query; replan loop with
+  max_replans=2; replaces old deepagents-based flow
+- `src/mcp/_research.py` — search backend chain (Tavily → DDG →
+  fixture) with retrieval post-processing; Tavily client singleton
+- `src/mcp/_retrieval.py` — retrieval post-processing pipeline
+  (semantic re-ranking via all-MiniLM-L6-v2, dedup, freshness
+  filtering, date-window filtering); wired into all 4 search
+  functions; graceful no-op when sentence-transformers absent
+- `src/core/joiner.py` — rule-based joiner (v0): decides
+  finish/replan/abort after step execution; replans on synth
+  failure
+- `src/core/executor.py` — parallel DAG executor; runs
+  independent steps concurrently
+- `src/core/dispatcher.py` — intent routing; `_FAST_PATH` for
+  smalltalk/meta_help, all other intents → planner pipeline
+- `src/core/router.py` — intent classifier
 - `src/core/resilient_stream.py` — retry + cache fallback; production-grade
   resilience pattern already in place
+- `src/core/agents/_factories.py` — 7 agent factories using
+  `_CyclingChatOpenAI` with automatic API key cycling
+- `src/personas/base.py` — persona system with key pool cycling;
+  panel agents use pinned slots (no cycling) for concurrent
+  streaming
+- `src/core/types.py` — Plan, PlanStep, Scratchpad,
+  ExecutionState, JoinDecision, JoinAction, UnmetDependency
 - `data/response_cache/` — disk-backed response cache; extend for per-user
   alert deduplication
+
+### Shipped features not in original plan
+
+- **`run_python` synthetic tool** — any agent can execute verified
+  Python code via `exec()` in a local namespace; suppressed from
+  streaming output
+- **Retrieval post-processing pipeline** — semantic re-ranking,
+  dedup (cosine θ=0.90), freshness filtering (min_year gate),
+  date-window filtering (closes DDG `enforced=False` gap);
+  24 unit tests in `tests/test_retrieval.py`
+- **API key cycling** — `_CyclingChatOpenAI` transparently rotates
+  through key pool on rate-limit; all 7 factories use `cycle_keys=True`
+- **Parallel step execution** — independent DAG steps run
+  concurrently; events collected per-step then yielded in step-id
+  order
+- **Replan loop** — joiner decides replan on synth failure; pipeline
+  retries with same dependency graph; max 2 replans then abort
+- **Tavily search integration** — agent-optimized search with
+  pre-summarized results and `answer` field; singleton client
+  pattern with negative caching
+- **FinBen baseline** — 71.1% overall (professional_accounting 26.7%,
+  econometrics 60%); establishes pre-fine-tuning benchmark
+
+### Known infrastructure gaps (demo → product)
+
+| Gap | Current state | Required for product |
+|---|---|---|
+| **API auth** | None — open endpoint | Clerk/Supabase auth + JWT |
+| **Request timeout** | No per-step wall-clock timeout | Stuck agent blocks entire pipeline |
+| **Rate limiting** | None | Per-user + global rate limits |
+| **CORS** | `allow_origins=["*"]` | Lock to production domains |
+| **Cache eviction** | Disk cache never evicts | TTL + LRU eviction |
+| **CI pipeline** | None | FinBen eval harness as CI gate |
+| **Python version** | Dockerfile=3.11, pyproject=3.12, conda=3.13 | Pin to 3.12 everywhere |

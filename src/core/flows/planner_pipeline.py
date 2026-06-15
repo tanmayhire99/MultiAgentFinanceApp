@@ -120,6 +120,7 @@ async def run(
         query,
         intent_flags=intent_flags,
         all_mcp_tools=tools,
+        user_id=user_id,
     ):
         etype = ev.get("type")
 

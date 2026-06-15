@@ -44,6 +44,7 @@ from src.core.joiner import decide as joiner_decide
 from src.core.panel import PanelEvent
 from src.core.planner import PlannerError, plan as build_plan
 from src.core.types import ExecutionState, Plan, Scratchpad, StepResult
+from src.core.verify_numbers import verify_numbers
 
 log = logging.getLogger("finai.pipeline")
 
@@ -59,6 +60,7 @@ async def run_pipeline(
     registry: AgentRegistry = REGISTRY,
     history_summary: Optional[str] = None,
     max_replans: int = 2,
+    user_id: str = "demo",
 ) -> AsyncIterator[PanelEvent]:
     """End-to-end planner-first pipeline for ``query``.
 
@@ -117,6 +119,7 @@ async def run_pipeline(
         plan=plan_obj,
         scratchpad=scratchpad,
         max_replans=max_replans,
+        user_id=user_id,
     )
 
     while True:
@@ -191,6 +194,23 @@ async def run_pipeline(
             f"received: {synth_step.depends_on}"
         )
         return
+
+    # Phase 5.5: verify numerical claims against scratchpad data
+    try:
+        verify_result = verify_numbers(final_text, scratchpad)
+        if verify_result.has_flags:
+            log.warning(
+                "verify_numbers: %d flagged claims in synthesizer output",
+                verify_result.flagged_count,
+            )
+        yield _status(
+            f"Number verification: {verify_result.verified_count} ✓, "
+            f"{verify_result.unverified_count} unverified, "
+            f"{verify_result.flagged_count} ✗"
+        )
+        final_text = verify_result.annotated_text
+    except Exception:
+        log.exception("verify_numbers failed; using unverified text")
 
     yield {"type": "text", "text": final_text, "persona": "synthesizer"}
 

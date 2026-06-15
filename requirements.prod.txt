@@ -42,16 +42,21 @@ cachetools>=5.3
 tavily-python>=0.3
 ddgs>=6.0
 
-# Deep Stock Research flow - see src/core/flows/deep_stock_research.py.
-# deepagents is the "agent harness" from LangChain: built-in planning
-# (write_todos), virtual filesystem, sub-agent spawning. We use it to
-# orchestrate multi-step claim-tracking research across SEC EDGAR +
-# Tavily historical news. beautifulsoup4 is needed for robust HTML->
-# text on SEC filings (fallback is a regex stripper).
-deepagents>=0.5,<1
+# Retrieval post-processing for the Research MCP worker (optional).
+# sentence-transformers provides semantic re-ranking and deduplication
+# of search results (all-MiniLM-L6-v2, ~90 MB model). When not installed,
+# the retrieval pipeline degrades gracefully (no-op fallback).
+# Install in Docker with: pip install sentence-transformers>=2.2
+# sentence-transformers>=2.2
+
+# Deep research is now handled by the planner-first pipeline
+# (src/core/flows/planner_pipeline.py) which generates a DAG of
+# ScopedAgent steps. deepagents is no longer used; keeping the dep
+# for backward compat if any legacy paths reference it.
+# deepagents>=0.5,<1
 beautifulsoup4>=4.12
 
-# Indian NSE/BSE deep-research path (src/agents/workers/_indian_filings.py).
+# Indian NSE/BSE deep-research path (src/mcp/_indian_filings.py).
 # - curl-cffi impersonates a real browser's TLS fingerprint so we can hit
 #   NSE's Cloudflare-protected API from a container.
 # - pdfplumber + pypdf extract text from 200-400 page Annual Reports and

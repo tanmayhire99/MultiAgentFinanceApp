@@ -82,13 +82,10 @@ from src.core.types import PlanStep, Scratchpad
 # ---------------------------------------------------------------------------
 def build_research_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for general web/news research steps.
 
@@ -97,32 +94,22 @@ def build_research_agent(
     doesn't drift off the user's question.
     """
     model = build_chat_model(
-        temperature=0.3,
-        max_tokens=1500,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.3, max_tokens=1500, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
 def build_filings_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for SEC / Indian filings extraction.
 
@@ -131,32 +118,22 @@ def build_filings_agent(
     extraction, not paraphrase).
     """
     model = build_chat_model(
-        temperature=0.1,
-        max_tokens=3000,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.1, max_tokens=3000, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
 def build_us_stock_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for US-equity quote / fundamentals fetching.
 
@@ -166,41 +143,31 @@ def build_us_stock_agent(
     NOT to invent numbers or paraphrase to vagueness. Hence:
 
     * **Lowest temperature (0.1)** — we want the LLM to repeat the
-      tool's numbers verbatim, not to round or rephrase.
+    tool's numbers verbatim, not to round or rephrase.
     * **Modest max_tokens (1500)** — fundamentals tables are short
-      (~10 metrics) and the agent's prose summary should fit in a
-      paragraph or two.
+    (~10 metrics) and the agent's prose summary should fit in a
+    paragraph or two.
 
     Same shape as :func:`build_indian_stock_agent` so a market-agnostic
     refactor can fold them together later if we ever decide to.
     """
     model = build_chat_model(
-        temperature=0.1,
-        max_tokens=1500,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.1, max_tokens=1500, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
 def build_indian_stock_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for NSE / BSE quote / fundamentals fetching.
 
@@ -212,32 +179,22 @@ def build_indian_stock_agent(
     NSE-specific quirks, etc.) has a clean home.
     """
     model = build_chat_model(
-        temperature=0.1,
-        max_tokens=1500,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.1, max_tokens=1500, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
 def build_portfolio_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for portfolio holdings + analytics.
 
@@ -253,32 +210,22 @@ def build_portfolio_agent(
     agent just needs a paragraph or two of narration.
     """
     model = build_chat_model(
-        temperature=0.1,
-        max_tokens=1500,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.1, max_tokens=1500, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
 def build_claim_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent for claim extraction + comparison.
 
@@ -288,15 +235,16 @@ def build_claim_agent(
     enforcement runs uniformly on every ScopedAgent construction.
 
     Tight temperature (0.1) because claim verdicts are
-    structured outputs (claim text + verdict label + evidence cite),
-    not free-form prose.
+    structured outputs (claim text + verdict label + evidence cite),  not free-form prose.
     """
     model = build_chat_model(
-        temperature=0.1,
-        max_tokens=2000,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.1, max_tokens=2000, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
+    )
+    return ScopedAgent(
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
     return ScopedAgent(
         step=step,
@@ -362,13 +310,10 @@ and call out the gap explicitly.
 
 def build_synthesizer(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """ScopedAgent specialised for the final user-visible synthesis.
 
@@ -387,21 +332,14 @@ def build_synthesizer(
         deps_repr=deps_repr,
     )
     model = build_chat_model(
-        temperature=0.3,
-        max_tokens=4000,
-        streaming=True,
-        api_key_slot=api_key_slot,
-        cycle_keys=True,
+        temperature=0.3, max_tokens=4000, streaming=True,
+        api_key_slot=api_key_slot, cycle_keys=True,
     )
     return ScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
-        system_prompt_override=system_prompt,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, system_prompt_override=system_prompt,
+        user_id=user_id,
     )
 
 
@@ -416,13 +354,10 @@ def build_synthesizer(
 # ---------------------------------------------------------------------------
 def build_panel_agent(
     *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> PanelScopedAgent:
     """Build the special :class:`PanelScopedAgent`.
 
@@ -437,19 +372,13 @@ def build_panel_agent(
     sensible starting point.
     """
     model = build_chat_model(
-        temperature=0.2,
-        max_tokens=1100,
-        streaming=True,
+        temperature=0.2, max_tokens=1100, streaming=True,
         api_key_slot=api_key_slot,
     )
     return PanelScopedAgent(
-        step=step,
-        scratchpad=scratchpad,
-        all_mcp_tools=all_mcp_tools,
-        model=model,
-        registry=registry,
-        intent_flags=intent_flags,
-        recursion_limit=recursion_limit,
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
     )
 
 
@@ -487,14 +416,10 @@ _FACTORY_MAP: Dict[str, _FactoryFn] = {
 
 
 def build_scoped_agent_for_step(
-    *,
-    step: PlanStep,
-    scratchpad: Scratchpad,
-    all_mcp_tools: Sequence[BaseTool],
-    intent_flags: Optional[Dict[str, bool]] = None,
-    registry: AgentRegistry = REGISTRY,
-    api_key_slot: str = "primary",
-    recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    *, step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
 ) -> ScopedAgent:
     """Dispatch on ``step.agent`` and call the right factory.
 
@@ -520,6 +445,7 @@ def build_scoped_agent_for_step(
         registry=registry,
         api_key_slot=api_key_slot,
         recursion_limit=recursion_limit,
+        user_id=user_id,
     )
 
 

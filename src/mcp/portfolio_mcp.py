@@ -60,10 +60,19 @@ def _grouped_sector(raw_sector: str) -> str:
 
 
 def _load_user_portfolio(user_id: str) -> Dict[str, Any]:
-    """Look up ``user_id`` in the fixture, compute derived fields once."""
+    """Look up ``user_id`` in the fixture, compute derived fields once.
+
+    If *user_id* is not in the fixture, falls back to the ``demo``
+    user so that authenticated users without a fixture entry still
+    get a working portfolio rather than a crash.
+    """
     if user_id not in _RAW:
         available = sorted(k for k in _RAW.keys() if not k.startswith("_"))
-        raise KeyError(f"User '{user_id}' not found. Available: {available}")
+        fallback = "demo" if "demo" in _RAW else next(iter(available), None)
+        if fallback and fallback in _RAW:
+            user_id = fallback
+        else:
+            raise KeyError(f"User '{user_id}' not found. Available: {available}")
     profile = dict(_RAW[user_id])  # shallow copy
     holdings = [dict(h) for h in profile["holdings"]]
     total_value = sum(h["current_value_usd"] for h in holdings)
