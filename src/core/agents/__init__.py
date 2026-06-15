@@ -20,18 +20,15 @@ from ._base import (
     ScopedAgent,
     ScopedAgentError,
 )
-from ._panel_agent import PanelScopedAgent
-from ._factories import (
-    build_claim_agent,
-    build_filings_agent,
-    build_indian_stock_agent,
-    build_panel_agent,
-    build_portfolio_agent,
-    build_research_agent,
-    build_scoped_agent_for_step,
-    build_synthesizer,
-    build_us_stock_agent,
-)
+from .panel_agent import PanelScopedAgent, build_panel_agent
+from .claim_agent import build_claim_agent
+from .filings_agent import build_filings_agent
+from .indian_stock_agent import build_indian_stock_agent
+from .portfolio_agent import build_portfolio_agent
+from .research_agent import build_research_agent
+from .synthesizer import build_synthesizer
+from .us_stock_agent import build_us_stock_agent
+from .factory_dispatch import build_scoped_agent_for_step
 from .registry import (
     REGISTRY,
     AgentDefinition,

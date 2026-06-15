@@ -1,4 +1,4 @@
-"""Unit tests for src.core.agents._factories — Stages 1 + 4 of the slice.
+"""Unit tests for the per-agent factories + factory_dispatch — Stages 1 + 4.
 
 Stage 1 (Day 4) covers the four agents the **claim-tracker** slice
 needed: research / filings / claim / synthesizer.
@@ -57,19 +57,16 @@ class _BindableFakeModel(FakeMessagesListChatModel):
         return self
 
 
-from src.core.agents._factories import (
-    build_claim_agent,
-    build_filings_agent,
-    build_indian_stock_agent,
-    build_panel_agent,
-    build_portfolio_agent,
-    build_research_agent,
-    build_scoped_agent_for_step,
-    build_synthesizer,
-    build_us_stock_agent,
-)
+from src.core.agents.claim_agent import build_claim_agent
+from src.core.agents.filings_agent import build_filings_agent
+from src.core.agents.indian_stock_agent import build_indian_stock_agent
+from src.core.agents.panel_agent import PanelScopedAgent, build_panel_agent
+from src.core.agents.portfolio_agent import build_portfolio_agent
+from src.core.agents.research_agent import build_research_agent
+from src.core.agents.synthesizer import build_synthesizer
+from src.core.agents.us_stock_agent import build_us_stock_agent
+from src.core.agents.factory_dispatch import build_scoped_agent_for_step
 from src.core.agents._base import ScopedAgent, ScopedAgentError
-from src.core.agents._panel_agent import PanelScopedAgent
 from src.core.agents.registry import REGISTRY
 from src.core.types import KNOWN_INTENT_FLAGS, PlanStep, Scratchpad, StepResult
 
@@ -128,7 +125,7 @@ def _fake_model() -> _BindableFakeModel:
 
 
 # Convenience: every factory test patches build_chat_model to bypass NIM.
-_PATCH_TARGET = "src.core.agents._factories.build_chat_model"
+_PATCH_TARGET = "src.core.agents._model.build_chat_model"
 
 
 # ---------------------------------------------------------------------------
@@ -818,14 +815,14 @@ class CrossCuttingTests(unittest.TestCase):
         # Day 4b invariant: every agent in REGISTRY has a factory.
         # If a 9th agent is added to the registry without a matching
         # factory, this surfaces immediately.
-        from src.core.agents._factories import _FACTORY_MAP
+        from src.core.agents.factory_dispatch import _FACTORY_MAP
         self.assertEqual(
             set(_FACTORY_MAP.keys()),
             {a.name for a in REGISTRY},
         )
 
     def test_factory_map_has_exactly_eight_factories(self):
-        from src.core.agents._factories import _FACTORY_MAP
+        from src.core.agents.factory_dispatch import _FACTORY_MAP
         self.assertEqual(
             set(_FACTORY_MAP.keys()),
             {

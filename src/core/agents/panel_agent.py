@@ -78,21 +78,23 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import BaseTool
 
-from src.core.agents._base import ScopedAgent
+from src.core.agents import _model
+from src.core.agents._base import DEFAULT_RECURSION_LIMIT, ScopedAgent
+from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.panel import PanelEvent
-from src.core.types import StepResult
+from src.core.types import PlanStep, Scratchpad, StepResult
 
 
-# ``build_panel_agent`` lives in :mod:`src.core.agents._factories` so it
-# shares the patched ``build_chat_model`` reference with every other
-# factory function (the test suite patches that single module-level
-# reference). This module exposes :class:`PanelScopedAgent` and the
-# :meth:`run` override; the factory there just chooses model params and
-# instantiates it.
+# :class:`PanelScopedAgent` (the :meth:`run` override) and its factory
+# ``build_panel_agent`` both live in this module. The factory routes its
+# ``build_chat_model`` call through :mod:`src.core.agents._model` like
+# every other per-agent factory, so the test suite's single patch target
+# covers it too.
 
 
 log = logging.getLogger("finai.panel_agent")
@@ -541,6 +543,42 @@ class PanelScopedAgent(ScopedAgent):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Factory (special — runs a multi-round persona debate, not a ReAct loop)
+# ---------------------------------------------------------------------------
+# The panel agent is gated by the registry's ``wants_panel_debate`` flag,
+# owns no MCP tools (the registry's ``tools=()``), and has its orchestration
+# logic in :class:`PanelScopedAgent` above. The factory here is a thin shell
+# that picks moderator-synthesis-style model parameters and instantiates the
+# subclass.
+def build_panel_agent(
+    *,
+    step: PlanStep, scratchpad: Scratchpad, all_mcp_tools: Sequence[BaseTool],
+    intent_flags: Optional[Dict[str, bool]] = None, registry: AgentRegistry = REGISTRY,
+    api_key_slot: str = "primary", recursion_limit: int = DEFAULT_RECURSION_LIMIT,
+    user_id: str = "demo",
+) -> PanelScopedAgent:
+    """Build the special :class:`PanelScopedAgent`.
+
+    Model parameters match the moderator-synthesis call so output style
+    is consistent across paths. The constructor's chat model is largely
+    **ceremonial** for a PanelScopedAgent because :meth:`PanelScopedAgent.run`
+    builds its own chat model for the closing-brief LLM call (it does not
+    run a ReAct loop). We still pass one for parity with every other
+    factory.
+    """
+    model = _model.build_chat_model(
+        temperature=0.2, max_tokens=1100, streaming=True,
+        api_key_slot=api_key_slot,
+    )
+    return PanelScopedAgent(
+        step=step, scratchpad=scratchpad, all_mcp_tools=all_mcp_tools,
+        model=model, registry=registry, intent_flags=intent_flags,
+        recursion_limit=recursion_limit, user_id=user_id,
+    )
+
+
 __all__ = [
     "PanelScopedAgent",
+    "build_panel_agent",
 ]
