@@ -22,3 +22,15 @@ FinanceApp.tar.gz
 # Runtime response-cache (demo safety net, regenerated per deployment)
 data/response_cache/*.json
 /test.py
+
+# Agent / editor tool config
+.claude/
+
+# Runtime session artifacts (regenerated)
+session_history/
+
+# Embedded eval repo — intentionally kept out of this repo's index
+evals/finlm_eval/
+
+# Personal docs (not project code)
+docs/resume.tex
