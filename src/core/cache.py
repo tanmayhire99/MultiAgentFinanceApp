@@ -52,6 +52,26 @@ _DEFAULT_DIR = os.path.join(
 )
 
 
+# Cap on the number of cached entries. The cache is a demo safety net, not a
+# durable store, so we bound it to keep the bind-mounted dir from growing
+# without limit. Override via ``FINAI_RESPONSE_CACHE_MAX_ENTRIES``; set <= 0
+# to disable eviction (unbounded).
+_DEFAULT_MAX_ENTRIES = 1000
+
+
+def _default_max_entries() -> int:
+    raw = os.environ.get("FINAI_RESPONSE_CACHE_MAX_ENTRIES", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_ENTRIES
+    try:
+        return int(raw)
+    except ValueError:
+        log.warning(
+            "Invalid FINAI_RESPONSE_CACHE_MAX_ENTRIES=%r; using default", raw
+        )
+        return _DEFAULT_MAX_ENTRIES
+
+
 @dataclass
 class CachedResponse:
     """Shape of what we store per persona turn / moderator turn."""
@@ -69,8 +89,13 @@ class CachedResponse:
 class ResponseCache:
     """Filesystem-backed latest-known-good cache for agent responses."""
 
-    def __init__(self, root: Optional[str] = None) -> None:
+    def __init__(
+        self, root: Optional[str] = None, max_entries: Optional[int] = None
+    ) -> None:
         self.root = root or os.environ.get("FINAI_RESPONSE_CACHE_DIR") or _DEFAULT_DIR
+        self.max_entries = (
+            max_entries if max_entries is not None else _default_max_entries()
+        )
         try:
             os.makedirs(self.root, exist_ok=True)
         except OSError as e:  # pragma: no cover - defensive
@@ -195,6 +220,46 @@ class ResponseCache:
             )
         except OSError as e:  # pragma: no cover - defensive
             log.warning("Failed to write cache file %s: %s", path, e)
+
+        self._evict_if_needed()
+
+    def _evict_if_needed(self) -> None:
+        """Evict oldest entries (by mtime) when over ``max_entries``.
+
+        No-op when ``max_entries`` <= 0 (unbounded). Best-effort: filesystem
+        errors are logged/swallowed so eviction never breaks a ``put()``.
+        """
+        if self.max_entries <= 0:
+            return
+        try:
+            paths = [
+                os.path.join(self.root, f)
+                for f in os.listdir(self.root)
+                if f.endswith(".json")
+            ]
+        except OSError:  # pragma: no cover - defensive
+            return
+        if len(paths) <= self.max_entries:
+            return
+        try:
+            # Oldest first. ``put`` rewrites bump mtime, so this is
+            # least-recently-written eviction.
+            paths.sort(key=os.path.getmtime)
+        except OSError:  # pragma: no cover - file vanished mid-sort
+            return
+        excess = len(paths) - self.max_entries
+        evicted = 0
+        for p in paths[:excess]:
+            try:
+                os.remove(p)
+                evicted += 1
+            except OSError:  # pragma: no cover - already gone
+                continue
+        if evicted:
+            log.info(
+                "Cache eviction: removed %d oldest entr%s (cap=%d)",
+                evicted, "y" if evicted == 1 else "ies", self.max_entries,
+            )
 
     def stats(self) -> Dict[str, Any]:
         """Return a small dict describing the cache state - for /health."""

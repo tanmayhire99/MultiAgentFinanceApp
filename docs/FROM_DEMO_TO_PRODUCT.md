@@ -134,9 +134,12 @@ What the demo does well:
 
 What it lacks vs a real product:
 
+> _Updated 2026-06: several items below shipped via the production-hardening
+> work + repo merge; status is noted inline (— shipped / — partially closed)._
+
 - **No persistent user memory.** Every session is cold. No idea who the user is between runs.
 - **No personalised risk profile.** Buffett / Wood / Graham give the same advice to a 25-year-old engineer as to a 55-year-old retiree.
-- **Numerical reasoning is weak.** `run_python` synthetic tool ships (any agent can execute verified Python), but no `verify_numbers` post-processing pass yet — the synthesizer still renders unchecked LLM-computed numbers. This is the QRData problem.
+- **Numerical reasoning — partially closed.** `run_python` synthetic tool ships, and the `verify_numbers` post-processing pass now runs in the pipeline (`src/core/pipeline.py`), flagging numeric claims in synthesizer output that don't match the scratchpad. Remaining QRData gap: the verifier *flags* but does not yet auto-correct, and badges aren't surfaced in the UI.
 - **No learning loop.** The system doesn't improve from its past verdicts.
 - **No real evaluation.** FinBen baseline recorded (71.1% overall), but no CI gate blocks regressions on model/prompt changes.
 - **No regulatory framing.** Zero visible SEBI/SEC disclaimers, no compliance audit trail, no "this is not advice" enforcement beyond a footer.
@@ -144,10 +147,10 @@ What it lacks vs a real product:
 - **No broker / portfolio-sync integration.** Portfolio is a static fixture.
 - **No real-time events.** Agents react to what the user asks, not to what's happening in the market.
 - **Personas are system-prompted, not fine-tuned.** Buffett's language is generic "value investor" talk, not his actual writing style.
-- **No API authentication.** Endpoints are open — no auth, no rate limiting, CORS allows all origins.
-- **No per-step timeout.** A stuck agent blocks the entire pipeline indefinitely.
-- **No cache eviction.** Disk-backed response cache grows without bound.
-- **Python version mismatch.** Dockerfile=3.11, pyproject.toml=3.12, conda=3.13 — must pin to 3.12 everywhere.
+- **API auth + rate limiting — shipped.** JWT auth middleware (`src/core/auth.py`) and a per-user token-bucket limiter (`src/core/ratelimit.py`) now gate the chat endpoints in `app.py`. Remaining: CORS still allows all origins (`allow_origins=["*"]`).
+- **Per-step timeout — shipped.** The executor enforces a per-step wall-clock timeout (`FINAI_STEP_TIMEOUT_S`, default 180s); a stuck agent is cancelled and committed as a failed step so it can't block the pipeline.
+- **Cache eviction — shipped.** The disk-backed response cache is bounded (`FINAI_RESPONSE_CACHE_MAX_ENTRIES`, default 1000); oldest entries are evicted on write.
+- **Python version — pinned.** Dockerfile, pyproject.toml, and environment.yml all target 3.12.
 
 ## 5. The persona fine-tuning question — yes, and here's how
 
@@ -250,7 +253,7 @@ approved "suitability" check.
 
 ### 3. Hybrid numerical reasoning [QRData, FinBen]
 
-**What**: Every numeric claim the LLM makes gets verified in Python. The `run_python` synthetic tool is shipped (agents can execute code), but the `verify_numbers_in_text(draft_text, known_data)` post-processing pass that the synthesizer calls before rendering is not yet implemented. Catches hallucinated numbers.
+**What**: Every numeric claim the LLM makes gets verified in Python. The `run_python` synthetic tool is shipped, and the `verify_numbers` post-processing pass now runs in the pipeline before rendering (flags scratchpad mismatches). Remaining work: auto-correct (not just flag) mismatched numbers, and surface verification badges in the UI.
 
 **Why**: GPT-4 only gets 58% on QRData. Cannot ship a financial product that
 hallucinates numbers.

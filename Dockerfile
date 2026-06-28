@@ -1,7 +1,7 @@
 # FinAI Multi-Agent Financial Advisor - Production Dockerfile
-# Based on Python 3.11 slim for optimal size and performance
+# Based on Python 3.12 slim (matches pyproject requires-python and environment.yml)
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Cache busting to ensure latest code is copied
 ARG CACHE_BUST=default

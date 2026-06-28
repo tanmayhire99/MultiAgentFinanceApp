@@ -31,6 +31,10 @@ Failure handling
 * If the agent's ReAct loop crashes, ScopedAgent.run already
   catches the exception and returns ``StepResult(status="failed")``.
   We forward that result to the scratchpad and continue.
+* If a step exceeds the per-step wall-clock timeout
+  (``FINAI_STEP_TIMEOUT_S``, default 180s), it is cancelled and
+  committed as a ``failed`` StepResult (``error_type="StepTimeout"``)
+  so one wedged agent can't block the whole pipeline.
 * If the executor itself crashes (programming bug), the exception
   propagates to the pipeline.
 
@@ -42,8 +46,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
-from typing import AsyncIterator, Dict, List, Optional, Sequence
+from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from langchain_core.tools import BaseTool
 
@@ -58,9 +63,34 @@ log = logging.getLogger("finai.executor")
 
 
 # Default per-step recursion limit that propagates into ScopedAgent.
-# Per-step in seconds is unenforced for now — long-running steps
-# (e.g. claim_agent making per-claim LLM calls) just take their time.
 DEFAULT_STEP_RECURSION_LIMIT = 25
+
+# Per-step wall-clock safety timeout (seconds). A stuck agent (hung MCP
+# tool, wedged LLM stream) would otherwise block the whole pipeline
+# indefinitely. On timeout the step is committed as a ``failed``
+# StepResult so the DAG walk skips its descendants and the joiner can
+# replan. Override via ``FINAI_STEP_TIMEOUT_S``; set <= 0 to disable.
+DEFAULT_STEP_TIMEOUT_S = 180.0
+
+# Sentinel so _run_one_step can tell "caller passed None to disable" apart
+# from "caller didn't specify → read the env default".
+_UNSET = object()
+
+
+def _default_step_timeout_s() -> Optional[float]:
+    """Resolve the per-step timeout from ``FINAI_STEP_TIMEOUT_S`` (or default).
+
+    Returns ``None`` (disabled) when the env var parses to <= 0.
+    """
+    raw = os.environ.get("FINAI_STEP_TIMEOUT_S", "").strip()
+    if not raw:
+        return DEFAULT_STEP_TIMEOUT_S
+    try:
+        val = float(raw)
+    except ValueError:
+        log.warning("Invalid FINAI_STEP_TIMEOUT_S=%r; using default", raw)
+        return DEFAULT_STEP_TIMEOUT_S
+    return val if val > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +419,7 @@ async def _run_one_step(
     registry: AgentRegistry,
     recursion_limit: int,
     user_id: str = "demo",
+    step_timeout_s: Any = _UNSET,
 ) -> AsyncIterator[PanelEvent]:
     """Build the step's ScopedAgent, run it (streaming), commit the result.
 
@@ -429,10 +460,18 @@ async def _run_one_step(
         ))
         return
 
+    # Resolve the per-step safety timeout (env default unless caller overrides).
+    timeout_s = (
+        _default_step_timeout_s() if step_timeout_s is _UNSET else step_timeout_s
+    )
+    step_started = time.time()
+
     # The agent's run() is now an AsyncIterator yielding
     # PanelEvents, with a terminal _step_result event.
     result: Optional[StepResult] = None
-    try:
+
+    async def _drive() -> AsyncIterator[PanelEvent]:
+        nonlocal result
         async for ev in agent.run():
             etype = ev.get("type")
 
@@ -452,6 +491,29 @@ async def _run_one_step(
             # "tool_result", "persona_verdict") pass through as-is.
             if etype not in ("_status", "error"):
                 yield ev
+
+    try:
+        if timeout_s is not None:
+            async with asyncio.timeout(timeout_s):
+                async for ev in _drive():
+                    yield ev
+        else:
+            async for ev in _drive():
+                yield ev
+    except asyncio.TimeoutError:
+        log.warning(
+            "Step %d (%s) exceeded %.0fs timeout — marking failed",
+            step.id, step.agent, timeout_s or 0,
+        )
+        result = StepResult(
+            step_id=step.id,
+            status="failed",
+            output=None,
+            error=f"step exceeded {timeout_s:.0f}s timeout",
+            error_type="StepTimeout",
+            started_at=step_started,
+            completed_at=time.time(),
+        )
     except Exception as e:
         log.exception("Unexpected exception running step %d", step.id)
         result = StepResult(
@@ -460,7 +522,7 @@ async def _run_one_step(
             output=None,
             error=str(e),
             error_type=type(e).__name__,
-            started_at=time.time(),
+            started_at=step_started,
             completed_at=time.time(),
         )
 

@@ -34,7 +34,8 @@ from typing import Any, Dict, List, AsyncIterator
 from unittest.mock import MagicMock, patch
 
 from src.core.agents._base import ScopedAgentError
-from src.core.executor import execute
+from src.core.agents.registry import REGISTRY
+from src.core.executor import execute, _run_one_step
 from src.core.types import KNOWN_INTENT_FLAGS, Plan, PlanStep, Scratchpad, StepResult
 
 
@@ -350,6 +351,96 @@ class FailureTests(unittest.TestCase):
         self.assertEqual(r.status, "failed")
         self.assertEqual(r.error_type, "RuntimeError")
         self.assertIn("kaboom", r.error)
+
+
+# ---------------------------------------------------------------------------
+# Per-step timeout
+# ---------------------------------------------------------------------------
+class StepTimeoutTests(unittest.TestCase):
+    def test_step_exceeding_timeout_is_marked_failed(self):
+        s1 = _step(1)
+        scratchpad = Scratchpad(query="q")
+
+        fake = MagicMock()
+        fake.step = s1
+
+        async def _slow_run():
+            await asyncio.sleep(5)  # far longer than the test timeout
+            yield {"type": "_step_result", "result": _ok_result(1)}
+
+        fake.run = _slow_run
+
+        async def _go():
+            with patch(
+                "src.core.executor.build_scoped_agent_for_step",
+                return_value=fake,
+            ):
+                async for _ev in _run_one_step(
+                    step=s1,
+                    scratchpad=scratchpad,
+                    intent_flags=_flags(),
+                    all_mcp_tools=[],
+                    registry=REGISTRY,
+                    recursion_limit=5,
+                    step_timeout_s=0.05,
+                ):
+                    pass
+
+        asyncio.run(_go())
+
+        r = scratchpad.get(1)
+        self.assertIsNotNone(r)
+        self.assertEqual(r.status, "failed")
+        self.assertEqual(r.error_type, "StepTimeout")
+        self.assertIn("timeout", (r.error or "").lower())
+
+    def test_fast_step_unaffected_by_generous_timeout(self):
+        s1 = _step(1)
+        scratchpad = Scratchpad(query="q")
+        fake = _make_fake_agent(step=s1, result=_ok_result(1))
+
+        async def _go():
+            with patch(
+                "src.core.executor.build_scoped_agent_for_step",
+                return_value=fake,
+            ):
+                async for _ev in _run_one_step(
+                    step=s1,
+                    scratchpad=scratchpad,
+                    intent_flags=_flags(),
+                    all_mcp_tools=[],
+                    registry=REGISTRY,
+                    recursion_limit=5,
+                    step_timeout_s=5.0,
+                ):
+                    pass
+
+        asyncio.run(_go())
+        self.assertEqual(scratchpad.get(1).status, "complete")
+
+    def test_timeout_disabled_with_none(self):
+        s1 = _step(1)
+        scratchpad = Scratchpad(query="q")
+        fake = _make_fake_agent(step=s1, result=_ok_result(1))
+
+        async def _go():
+            with patch(
+                "src.core.executor.build_scoped_agent_for_step",
+                return_value=fake,
+            ):
+                async for _ev in _run_one_step(
+                    step=s1,
+                    scratchpad=scratchpad,
+                    intent_flags=_flags(),
+                    all_mcp_tools=[],
+                    registry=REGISTRY,
+                    recursion_limit=5,
+                    step_timeout_s=None,  # explicitly disabled
+                ):
+                    pass
+
+        asyncio.run(_go())
+        self.assertEqual(scratchpad.get(1).status, "complete")
 
 
 if __name__ == "__main__":
