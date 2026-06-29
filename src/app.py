@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -99,9 +100,19 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=_lifespan,
 )
+# CORS: lock to explicit origins in production via FINAI_ALLOWED_ORIGINS
+# (comma-separated). Wildcard "*" is unsafe for a credentialed API and is in fact
+# rejected by browsers alongside allow_credentials=True. Defaults to local dev.
+_allowed_origins = [
+    o.strip()
+    for o in os.environ.get(
+        "FINAI_ALLOWED_ORIGINS", "http://localhost:3080,http://localhost:8000"
+    ).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
