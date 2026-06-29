@@ -201,6 +201,14 @@ async def get_tools() -> List[BaseTool]:
         return _tools_cache
 
 
+def tools_loaded_count() -> int:
+    """Cheap, non-blocking count of loaded MCP tools (0 if not yet warmed).
+
+    Safe for liveness/readiness probes — never spawns workers or does I/O.
+    """
+    return len(_tools_cache) if _tools_cache else 0
+
+
 async def shutdown() -> None:
     """Terminate the MCP subprocesses cleanly (called on app shutdown)."""
     global _client, _tools_cache

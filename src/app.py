@@ -118,6 +118,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_access_log = logging.getLogger("finai.access")
+
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Attach a request ID, time the request, and emit one structured access
+    log line per request. Honors an inbound ``X-Request-ID`` (so logs correlate
+    across a reverse proxy) and echoes it back on the response."""
+    rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        dur_ms = (time.perf_counter() - start) * 1000.0
+        _access_log.exception(
+            "rid=%s %s %s -> EXCEPTION in %.1fms", rid, request.method, request.url.path, dur_ms
+        )
+        raise
+    dur_ms = (time.perf_counter() - start) * 1000.0
+    response.headers["X-Request-ID"] = rid
+    _access_log.info(
+        "rid=%s %s %s -> %d in %.1fms",
+        rid, request.method, request.url.path, response.status_code, dur_ms,
+    )
+    return response
+
 
 # ---------------------------------------------------------------------------
 # Schema (OpenAI-compatible)
@@ -239,11 +265,23 @@ async def list_models():
 
 @app.get("/health")
 async def health_check():
+    """Liveness + cheap readiness. Intentionally does NO network/DB I/O (the
+    container HEALTHCHECK polls this often); deep dependency checks would belong
+    in a separate readiness probe."""
+    tools = mcp_servers.tools_loaded_count()
+    checks = {
+        "llm_key_configured": bool(os.environ.get("NVIDIA_API_KEY")),
+        "mcp_tools_loaded": tools,
+        "mcp_warm": tools > 0,
+        "warehouse_enabled": bool(os.environ.get("WAREHOUSE_DATABASE_URL")),
+        "quant_enabled": "quant" in mcp_servers.MCP_SERVERS,
+    }
     return {
-        "status": "healthy",
+        "status": "healthy" if checks["llm_key_configured"] else "degraded",
         "service": "finai",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "timestamp": int(time.time()),
+        "checks": checks,
     }
 
 
