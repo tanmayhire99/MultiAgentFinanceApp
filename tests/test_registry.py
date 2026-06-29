@@ -11,7 +11,7 @@ Coverage:
    unsatisfied, valid step (all parameterised by ``intent_flags``)
 7. The headline behaviour: claim_agent / panel_agent are blocked unless the
    classifier set the corresponding intent flag
-8. The canonical REGISTRY: 34-tool count, no orphan tools, gated set,
+8. The canonical REGISTRY: 37-tool count, no orphan tools, gated set,
    planner_catalog_text shape
 
 Run via::
@@ -356,15 +356,15 @@ class CanonicalPolicyGateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class CanonicalRegistryInvariantTests(unittest.TestCase):
     def test_tool_count_matches_mcp_namespacing(self):
-        # The 8 agents collectively own exactly 34 tools — the same total
+        # The 8 agents collectively own exactly 37 tools — the same total
         # as what mcp_servers.get_tools() returns. If this fails the
         # registry got out of sync with the MCP workers.
         all_tools = set()
         for a in REGISTRY:
             all_tools.update(a.tools)
         self.assertEqual(
-            len(all_tools), 34,
-            f"Expected 34 namespaced MCP tools across the registry, "
+            len(all_tools), 37,
+            f"Expected 37 namespaced MCP tools across the registry, "
             f"got {len(all_tools)}. Tools: {sorted(all_tools)}",
         )
 

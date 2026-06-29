@@ -131,7 +131,7 @@ def _partition_and_namespace(tools: List[BaseTool]) -> List[BaseTool]:
     known_counts = {
         "portfolio": 6,      # list_supported_users, holdings, summary, sectors, risks, score
         "us_stock": 6,       # list, quote, fundamentals, growth, defensive, moat_signals
-        "indian_stock": 6,   # same as us_stock
+        "indian_stock": 9,   # us_stock 6 + warehouse: price_history, top_movers, sector_performance
         "research": 16,      # list, search_news, search_web, company_brief, catalysts,
                              # analyst_takes, search_historical_news, get_sec_filings,
                              # fetch_sec_document, extract_forward_claims, compare_claim_to_reality,

@@ -247,7 +247,7 @@ class ToolFilteringTests(unittest.TestCase):
                 intent_flags=_flags(),
             )
         # The structural validation in registry runs first (catches "not
-        # owned by registry" against the canonical 34-tool catalog), so
+        # owned by registry" against the canonical 37-tool catalog), so
         # we either see the registry's "not owned by agent" message OR
         # the MCP-pool "not present" message. Either is acceptable -
         # both block the bug. Check for either.

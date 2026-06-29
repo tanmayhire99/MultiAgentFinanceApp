@@ -111,7 +111,7 @@ def _fake_tool(name: str) -> StructuredTool:
 
 
 def _all_mcp_tools() -> List[StructuredTool]:
-    """Stub of the entire 34-tool MCP pool — only names matter for tests."""
+    """Stub of the entire 37-tool MCP pool — only names matter for tests."""
     names = []
     for agent_def in REGISTRY:
         names.extend(agent_def.tools)

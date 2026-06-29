@@ -418,7 +418,7 @@ class AgentRegistry:
 # Canonical agent catalog
 # ---------------------------------------------------------------------------
 # Tool names match the namespaced output of ``mcp_servers.get_tools()`` as of
-# 2026-04-25. Total tool count = 34 across 8 agents (verified by tests). When
+# 2026-06-29. Total tool count = 37 across 8 agents (verified by tests). When
 # a tool is added or removed in src/mcp/*, update its entry here
 # AND bump src/config/mcp_servers.py's ``known_counts``.
 # ---------------------------------------------------------------------------
@@ -470,12 +470,16 @@ INDIAN_STOCK_AGENT = AgentDefinition(
     name="indian_stock_agent",
     title="Indian Stock Agent",
     description=(
-        "Same shape as the US stock agent but for NSE / BSE-listed "
-        "tickers (TCS, INFY, RELIANCE, HDFCBANK, ITC, etc.). Currency "
-        "fields are converted to USD; native currency is reported in "
-        "the result for transparency."
+        "NSE / BSE tickers (TCS, INFY, RELIANCE, HDFCBANK, etc.): quote, "
+        "fundamentals, growth, defensive, moat. Also warehouse-backed "
+        "NIFTY-50 market data — exchange-sourced price history, 30-day top "
+        "movers, and weekly sector performance (equity-pipeline). Currency "
+        "fields converted to USD; native currency reported."
     ),
-    role_hint="any NSE / BSE ticker for which we need fundamentals or quote data",
+    role_hint=(
+        "any NSE / BSE ticker for fundamentals/quote, or NSE market-wide "
+        "questions like price history, top movers, or sector performance"
+    ),
     tools=(
         "indian_stock__get_quote",
         "indian_stock__get_fundamentals",
@@ -483,6 +487,9 @@ INDIAN_STOCK_AGENT = AgentDefinition(
         "indian_stock__get_defensive_metrics",
         "indian_stock__get_moat_signals",
         "indian_stock__list_supported_tickers",
+        "indian_stock__get_price_history",
+        "indian_stock__get_top_movers",
+        "indian_stock__get_sector_performance",
     ),
 )
 

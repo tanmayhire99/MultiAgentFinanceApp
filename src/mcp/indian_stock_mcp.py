@@ -17,6 +17,7 @@ Run as::
 """
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any, Dict, List
 
 from fastmcp import FastMCP
@@ -62,6 +63,15 @@ def _live_map(ticker: str, mapper) -> Dict[str, Any] | None:
     return _live.fetch_and_map(ticker, mapper, suffix=_YFINANCE_SUFFIX)
 
 
+def _inr_to_usd(value: Any) -> Any:
+    """Convert an INR figure to USD via the constant FX rate, preserving
+    ``None`` / non-numeric values untouched."""
+    try:
+        return round(float(value) * _live.USD_PER_INR, 4) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _warehouse_quote(ticker: str) -> Dict[str, Any] | None:
     """Map the equity-pipeline warehouse's NSE EOD snapshot into the
     ``get_quote`` schema, converting INR → USD like the live path so every
@@ -71,28 +81,20 @@ def _warehouse_quote(ticker: str) -> Dict[str, Any] | None:
     row = _warehouse.get_quote(ticker)
     if not row:
         return None
-    fx = _live.USD_PER_INR
-
-    def _usd(v: Any) -> Any:
-        try:
-            return round(float(v) * fx, 4) if v is not None else None
-        except (TypeError, ValueError):
-            return None
-
     return {
         "ticker": (row.get("ticker") or ticker).upper(),
         "name": row.get("company_name"),
         "exchange": "NSE",
         "sector": row.get("sector"),
-        "price": _usd(row.get("latest_close")),
-        "vwap": _usd(row.get("latest_vwap")),
+        "price": _inr_to_usd(row.get("latest_close")),
+        "vwap": _inr_to_usd(row.get("latest_vwap")),
         "volume": row.get("latest_volume"),
-        "52w_high": _usd(row.get("high_52w")),
-        "52w_low": _usd(row.get("low_52w")),
+        "52w_high": _inr_to_usd(row.get("high_52w")),
+        "52w_low": _inr_to_usd(row.get("low_52w")),
         "return_30d_pct": row.get("return_30d_pct"),
         "currency": "USD",
         "native_currency": "INR",
-        "fx_rate_usd_per_inr": round(fx, 6),
+        "fx_rate_usd_per_inr": round(_live.USD_PER_INR, 6),
         "as_of_date": row.get("latest_date"),
         "_source": "warehouse:equity-pipeline",
     }
@@ -248,6 +250,130 @@ def get_moat_signals(ticker: str) -> Dict[str, Any]:
         "disruption_score": (entry.get("growth") or {}).get("disruption_score"),
         "narrative": (entry.get("growth") or {}).get("narrative"),
         "_source": "fixture:indian_stocks",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Warehouse-backed market-data tools (equity-pipeline; NIFTY-50, NSE EOD)
+# ---------------------------------------------------------------------------
+# These surface data the warehouse uniquely provides (clean exchange history,
+# sector performance, market movers) that yfinance/fixtures don't. They need
+# WAREHOUSE_DATABASE_URL configured; without it they return a clear notice so
+# the planner knows to skip them rather than the agent erroring.
+_WAREHOUSE_OFF = {
+    "error": "equity warehouse not configured (set WAREHOUSE_DATABASE_URL)",
+    "_source": "none",
+}
+
+
+@mcp.tool
+def get_price_history(ticker: str, days: int = 30) -> Dict[str, Any]:
+    """Daily OHLCV + VWAP + 7d/30d moving averages for an NSE ticker over the
+    trailing ``days`` (default 30, max 365), from the equity-pipeline warehouse
+    (official NSE bhavcopy EOD). Prices are converted INR → USD.
+
+    Warehouse-only: returns a notice if the warehouse isn't configured or the
+    ticker isn't in its NIFTY-50 universe.
+    """
+    if not _warehouse.is_available():
+        return {"ticker": ticker.upper(), **_WAREHOUSE_OFF}
+    days = max(1, min(int(days or 30), 365))
+    to_date = dt.date.today()
+    rows = _warehouse.get_history(ticker, to_date - dt.timedelta(days=days), to_date)
+    if not rows:
+        return {
+            "ticker": ticker.upper(),
+            "error": "no warehouse history (not in the NIFTY-50 universe?)",
+            "_source": "warehouse:equity-pipeline",
+        }
+    bars = [
+        {
+            "date": r.get("trade_date"),
+            "open": _inr_to_usd(r.get("open")),
+            "high": _inr_to_usd(r.get("high")),
+            "low": _inr_to_usd(r.get("low")),
+            "close": _inr_to_usd(r.get("close")),
+            "vwap": _inr_to_usd(r.get("vwap")),
+            "volume": r.get("volume"),
+            "ma_7d": _inr_to_usd(r.get("ma_7d")),
+            "ma_30d": _inr_to_usd(r.get("ma_30d")),
+        }
+        for r in rows
+    ]
+    return {
+        "ticker": ticker.upper(),
+        "currency": "USD",
+        "native_currency": "INR",
+        "fx_rate_usd_per_inr": round(_live.USD_PER_INR, 6),
+        "days": days,
+        "count": len(bars),
+        "bars": bars,
+        "_source": "warehouse:equity-pipeline",
+    }
+
+
+@mcp.tool
+def get_top_movers(limit: int = 10) -> Dict[str, Any]:
+    """Top gainers over the trailing 30 days across the NIFTY-50 universe, from
+    the equity-pipeline warehouse. Prices converted INR → USD; returns are %.
+
+    Warehouse-only: returns a notice if the warehouse isn't configured.
+    """
+    if not _warehouse.is_available():
+        return _WAREHOUSE_OFF
+    rows = _warehouse.get_top_movers(limit=max(1, min(int(limit or 10), 50)))
+    if rows is None:
+        return {"error": "warehouse query failed", "_source": "warehouse:equity-pipeline"}
+    movers = [
+        {
+            "ticker": r.get("ticker"),
+            "name": r.get("company_name"),
+            "sector": r.get("sector"),
+            "close_30d_ago": _inr_to_usd(r.get("close_30d_ago")),
+            "close_today": _inr_to_usd(r.get("close_today")),
+            "return_30d_pct": r.get("return_30d_pct"),
+        }
+        for r in rows
+    ]
+    return {
+        "universe": "NIFTY-50",
+        "window": "30d",
+        "currency": "USD",
+        "movers": movers,
+        "_source": "warehouse:equity-pipeline",
+    }
+
+
+@mcp.tool
+def get_sector_performance(weeks: int = 4) -> Dict[str, Any]:
+    """Average daily return (%) and traded volume by sector and ISO week across
+    the NIFTY-50 universe, from the equity-pipeline warehouse. Bounded to the
+    most recent ``weeks`` ISO weeks (default 4, max 52) so the payload stays
+    small — the view itself holds the full backfill.
+
+    Warehouse-only: returns a notice if the warehouse isn't configured.
+    """
+    if not _warehouse.is_available():
+        return _WAREHOUSE_OFF
+    rows = _warehouse.get_sector_performance()
+    if rows is None:
+        return {"error": "warehouse query failed", "_source": "warehouse:equity-pipeline"}
+    weeks = max(1, min(int(weeks or 4), 52))
+    # Keep only the most recent ``weeks`` (year, ISO-week) buckets.
+    recent_keys = sorted(
+        {(r.get("year"), r.get("week_number")) for r in rows}, reverse=True
+    )[:weeks]
+    keyset = set(recent_keys)
+    recent = [r for r in rows if (r.get("year"), r.get("week_number")) in keyset]
+    recent.sort(
+        key=lambda r: (r.get("year") or 0, r.get("week_number") or 0, r.get("sector") or ""),
+        reverse=True,
+    )
+    return {
+        "universe": "NIFTY-50",
+        "weeks": weeks,
+        "rows": recent,
+        "_source": "warehouse:equity-pipeline",
     }
 
 

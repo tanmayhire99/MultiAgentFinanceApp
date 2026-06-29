@@ -101,5 +101,76 @@ class IndianWarehouseQuoteMappingTests(unittest.TestCase):
             self.assertIsNone(indian_stock_mcp._warehouse_quote("ZZZ"))
 
 
+class WarehouseToolTests(unittest.TestCase):
+    """The 3 warehouse-backed MCP tools on the indian_stock worker."""
+
+    def _on(self):
+        return patch.object(indian_stock_mcp._warehouse, "is_available", return_value=True)
+
+    def _off(self):
+        return patch.object(indian_stock_mcp._warehouse, "is_available", return_value=False)
+
+    # -- get_price_history --
+    def test_price_history_notice_when_off(self):
+        with self._off():
+            out = indian_stock_mcp.get_price_history("RELIANCE")
+        self.assertEqual(out["_source"], "none")
+        self.assertIn("warehouse", out["error"].lower())
+
+    def test_price_history_maps_and_converts(self):
+        rows = [{
+            "trade_date": "2026-06-25", "open": 1700.0, "high": 1717.0,
+            "low": 1683.0, "close": 1700.0, "vwap": 1710.0, "volume": 1000,
+            "ma_7d": 1700.0, "ma_30d": 1700.0,
+        }]
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_history", return_value=rows):
+            out = indian_stock_mcp.get_price_history("RELIANCE.NS", days=10)
+        self.assertEqual(out["_source"], "warehouse:equity-pipeline")
+        self.assertEqual(out["currency"], "USD")
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["bars"][0]["close"], 20.0)   # 1700/85
+        self.assertEqual(out["bars"][0]["date"], "2026-06-25")
+        self.assertEqual(out["bars"][0]["volume"], 1000)  # not currency-converted
+
+    def test_price_history_empty(self):
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_history", return_value=None):
+            out = indian_stock_mcp.get_price_history("ZZZ")
+        self.assertIn("no warehouse history", out["error"])
+
+    # -- get_top_movers --
+    def test_top_movers_maps_and_converts(self):
+        rows = [{
+            "ticker": "ICICIBANK", "company_name": "ICICI Bank Ltd",
+            "sector": "Financials", "close_30d_ago": 85.0, "close_today": 850.0,
+            "return_30d_pct": 11.92,
+        }]
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_top_movers", return_value=rows):
+            out = indian_stock_mcp.get_top_movers(limit=1)
+        self.assertEqual(out["_source"], "warehouse:equity-pipeline")
+        self.assertEqual(out["movers"][0]["ticker"], "ICICIBANK")
+        self.assertEqual(out["movers"][0]["close_today"], 10.0)   # 850/85
+        self.assertEqual(out["movers"][0]["return_30d_pct"], 11.92)  # % untouched
+
+    def test_top_movers_notice_when_off(self):
+        with self._off():
+            self.assertEqual(indian_stock_mcp.get_top_movers()["_source"], "none")
+
+    # -- get_sector_performance --
+    def test_sector_performance_passthrough(self):
+        rows = [{
+            "sector": "IT", "year": 2026, "week_number": 26,
+            "avg_daily_return_pct": 0.5, "total_volume": 1_000_000,
+            "stocks_in_sector": 5,
+        }]
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_sector_performance", return_value=rows):
+            out = indian_stock_mcp.get_sector_performance()
+        self.assertEqual(out["rows"], rows)
+        self.assertEqual(out["_source"], "warehouse:equity-pipeline")
+
+    def test_sector_performance_notice_when_off(self):
+        with self._off():
+            self.assertEqual(indian_stock_mcp.get_sector_performance()["_source"], "none")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
