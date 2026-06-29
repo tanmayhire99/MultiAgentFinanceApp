@@ -22,6 +22,7 @@ from typing import Any, Dict, List
 from fastmcp import FastMCP
 
 from . import _live
+from . import _warehouse
 from ._fixtures import load_fixture, lookup
 
 
@@ -61,6 +62,42 @@ def _live_map(ticker: str, mapper) -> Dict[str, Any] | None:
     return _live.fetch_and_map(ticker, mapper, suffix=_YFINANCE_SUFFIX)
 
 
+def _warehouse_quote(ticker: str) -> Dict[str, Any] | None:
+    """Map the equity-pipeline warehouse's NSE EOD snapshot into the
+    ``get_quote`` schema, converting INR → USD like the live path so every
+    agent still speaks one currency. Returns ``None`` when the warehouse is
+    disabled / unreachable / has no row for ``ticker`` (caller falls back).
+    """
+    row = _warehouse.get_quote(ticker)
+    if not row:
+        return None
+    fx = _live.USD_PER_INR
+
+    def _usd(v: Any) -> Any:
+        try:
+            return round(float(v) * fx, 4) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "ticker": (row.get("ticker") or ticker).upper(),
+        "name": row.get("company_name"),
+        "exchange": "NSE",
+        "sector": row.get("sector"),
+        "price": _usd(row.get("latest_close")),
+        "vwap": _usd(row.get("latest_vwap")),
+        "volume": row.get("latest_volume"),
+        "52w_high": _usd(row.get("high_52w")),
+        "52w_low": _usd(row.get("low_52w")),
+        "return_30d_pct": row.get("return_30d_pct"),
+        "currency": "USD",
+        "native_currency": "INR",
+        "fx_rate_usd_per_inr": round(fx, 6),
+        "as_of_date": row.get("latest_date"),
+        "_source": "warehouse:equity-pipeline",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -80,11 +117,17 @@ def list_supported_tickers() -> Dict[str, Any]:
 def get_quote(ticker: str) -> Dict[str, Any]:
     """Return the latest quote for an NSE ticker.
 
-    Returned in USD: the live ``yfinance`` path auto-converts from the
-    exchange's native INR (via :data:`src.mcp._live.USD_PER_INR`)
-    and the fixture fallback is stored in USD too, so downstream
-    consumers always see one currency.
+    Source preference: **equity-pipeline warehouse** (official NSE bhavcopy
+    EOD, exchange-sourced) → live ``yfinance`` (15-min delayed) → curated
+    fixture. The warehouse path only kicks in when ``WAREHOUSE_DATABASE_URL``
+    is configured and the ticker is in its NIFTY-50 universe; otherwise it
+    transparently falls back. All paths return USD (converted from the
+    exchange's native INR via :data:`src.mcp._live.USD_PER_INR`) so
+    downstream consumers always see one currency.
     """
+    warehoused = _warehouse_quote(ticker)
+    if warehoused is not None:
+        return warehoused
     live = _live_map(ticker, _live.map_quote)
     if live is not None:
         return live

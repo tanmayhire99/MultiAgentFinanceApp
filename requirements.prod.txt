@@ -65,3 +65,9 @@ beautifulsoup4>=4.12
 curl-cffi>=0.7
 pdfplumber>=0.11
 pypdf>=5
+
+# Equity warehouse integration (sibling `equity-pipeline` project). The
+# Indian-stock worker reads exchange-sourced NSE EOD data from its PostgreSQL
+# analytics layer when WAREHOUSE_DATABASE_URL is set; falls back to yfinance
+# otherwise. psycopg2 is only used by src/mcp/_warehouse.py.
+psycopg2-binary>=2.9
