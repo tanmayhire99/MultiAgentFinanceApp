@@ -64,6 +64,23 @@ collection).
 - To move the baseline intentionally (e.g. model upgrade): run
   `python evals/scorecard.py run` and commit the new `baseline.json` separately.
 
+## MIDAS cross-project integrations (opt-in)
+
+FinAI is the hub; sibling MIDAS projects plug in via the MCP tool layer. Both
+are opt-in (env-gated) so FinAI runs standalone by default.
+
+- **equity-pipeline (data)** — set `WAREHOUSE_DATABASE_URL` and the
+  `indian_stock` worker reads exchange-sourced NSE EOD data (quote / price
+  history / top movers / sector performance) from that Postgres warehouse
+  (`src/mcp/_warehouse.py`); falls back to yfinance when unset.
+- **automated-trading (quant)** — set `QUANT_MCP_PYTHON` + `QUANT_MCP_CWD` and
+  FinAI spawns that repo's READ-ONLY `quant_mcp.py` server **in its own Python
+  3.14 venv** (cross-runtime, via a per-server `command` in
+  `src/config/mcp_servers.py`), exposing a `quant_agent` for listing/backtesting
+  NIFTY F&O strategy templates. **No execution surface is ever exposed** — the
+  hard boundary in `automated-trading/docs/CONTEXT.md` is preserved.
+  When unset, the quant agent + server are absent (registry stays at 37 tools).
+
 ## Git identity (important)
 
 Commits here MUST be attributed to **`tanmay.hire99@gmail.com`** (GitHub:

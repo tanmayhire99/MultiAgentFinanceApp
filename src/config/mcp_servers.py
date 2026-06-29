@@ -67,6 +67,31 @@ MCP_SERVERS: Dict[str, Dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Opt-in cross-project worker: the sibling `automated-trading` repo's READ-ONLY
+# "quant" MCP server (backtesting). It runs in ITS OWN interpreter (Python 3.14
+# venv) since it can't share FinAI's 3.12 env — hence a per-server ``command``.
+# Enabled only when both env vars are set, so FinAI runs standalone by default
+# (CI, tests). Exposes backtest/list-strategies only; no execution surface.
+# ---------------------------------------------------------------------------
+def quant_server_config(python: str, cwd: str) -> Dict[str, Any]:
+    """Build the stdio MCP_SERVERS entry for the automated-trading quant server."""
+    return {
+        "command": python,
+        "args": ["quant_mcp.py"],
+        "transport": "stdio",
+        "cwd": cwd,
+        "env": dict(os.environ),
+    }
+
+
+_QUANT_PY = os.environ.get("QUANT_MCP_PYTHON", "").strip()
+_QUANT_CWD = os.environ.get("QUANT_MCP_CWD", "").strip()
+if _QUANT_PY and _QUANT_CWD:
+    MCP_SERVERS["quant"] = quant_server_config(_QUANT_PY, _QUANT_CWD)
+    log.info("quant MCP server enabled (cwd=%s)", _QUANT_CWD)
+
+
 _client: Optional[MultiServerMCPClient] = None
 _tools_cache: Optional[List[BaseTool]] = None
 _init_lock = asyncio.Lock()
@@ -138,6 +163,9 @@ def _partition_and_namespace(tools: List[BaseTool]) -> List[BaseTool]:
                              # get_indian_filings, fetch_indian_document, get_screener_snapshot,
                              # get_indian_concall_urls, get_indian_annual_reports
     }
+    # Opt-in cross-project quant server (last in MCP_SERVERS when enabled).
+    if "quant" in MCP_SERVERS:
+        known_counts["quant"] = 2  # list_strategies, backtest_strategy
     expected = sum(known_counts.values())
     if len(tools) != expected:
         # Can't safely partition; just leave names as-is. Surface a loud

@@ -34,6 +34,7 @@ from src.core.agents.filings_agent import build_filings_agent
 from src.core.agents.indian_stock_agent import build_indian_stock_agent
 from src.core.agents.panel_agent import build_panel_agent
 from src.core.agents.portfolio_agent import build_portfolio_agent
+from src.core.agents.quant_agent import build_quant_agent
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.agents.research_agent import build_research_agent
 from src.core.agents.synthesizer import build_synthesizer
@@ -59,6 +60,12 @@ _FACTORY_MAP: Dict[str, _FactoryFn] = {
     "synthesizer": build_synthesizer,
     "panel_agent": build_panel_agent,
 }
+
+# Opt-in quant agent: only registered when the sibling automated-trading quant
+# MCP server is enabled (so _FACTORY_MAP stays in lockstep with REGISTRY, which
+# the cross-cutting coverage test enforces).
+if any(a.name == "quant_agent" for a in REGISTRY):
+    _FACTORY_MAP["quant_agent"] = build_quant_agent
 
 
 def build_scoped_agent_for_step(

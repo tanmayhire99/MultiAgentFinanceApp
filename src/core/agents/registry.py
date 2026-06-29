@@ -65,6 +65,7 @@ output (Phase 1) and the planner's output (Phase 2).
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -619,18 +620,53 @@ PANEL_AGENT = AgentDefinition(
 )
 
 
-REGISTRY = AgentRegistry(
-    [
-        RESEARCH_AGENT,
-        US_STOCK_AGENT,
-        INDIAN_STOCK_AGENT,
-        FILINGS_AGENT,
-        PORTFOLIO_AGENT,
-        SYNTHESIZER,
-        CLAIM_AGENT,
-        PANEL_AGENT,
-    ]
+# --- OPT-IN CROSS-PROJECT AGENT ----------------------------------------------
+# Surfaces the sibling automated-trading project's READ-ONLY quant backtester
+# (via its MCP server). Added to the live registry ONLY when that server is
+# enabled (QUANT_MCP_PYTHON + QUANT_MCP_CWD set), so the planner never
+# advertises a capability that isn't connected. Backtesting only — the MCP
+# server exposes no execution surface (see automated-trading/quant_mcp.py).
+QUANT_AGENT = AgentDefinition(
+    name="quant_agent",
+    title="Quant Strategy Agent",
+    description=(
+        "Read-only systematic F&O research (sibling automated-trading project): "
+        "lists disclosed NIFTY options strategy templates (short straddle, iron "
+        "condor) and backtests them on warehoused NSE EOD data, returning "
+        "risk-adjusted metrics (Sharpe, expectancy, drawdown, alpha) plus a 2x "
+        "cost-stress check. Backtesting only — places no trades."
+    ),
+    role_hint=(
+        "backtesting or evaluating systematic NIFTY options strategies "
+        "(short straddle / iron condor), or their historical performance"
+    ),
+    tools=(
+        "quant__list_strategies",
+        "quant__backtest_strategy",
+    ),
 )
+
+
+def _quant_enabled() -> bool:
+    """The quant agent/server is opt-in (sibling project, separate runtime)."""
+    return bool(os.getenv("QUANT_MCP_PYTHON") and os.getenv("QUANT_MCP_CWD"))
+
+
+_REGISTRY_AGENTS = [
+    RESEARCH_AGENT,
+    US_STOCK_AGENT,
+    INDIAN_STOCK_AGENT,
+    FILINGS_AGENT,
+    PORTFOLIO_AGENT,
+    SYNTHESIZER,
+    CLAIM_AGENT,
+    PANEL_AGENT,
+]
+if _quant_enabled():
+    # Sit with the ungated data/analysis agents, before the synthesizer.
+    _REGISTRY_AGENTS.insert(5, QUANT_AGENT)
+
+REGISTRY = AgentRegistry(_REGISTRY_AGENTS)
 
 
 __all__ = [
@@ -646,4 +682,5 @@ __all__ = [
     "SYNTHESIZER",
     "CLAIM_AGENT",
     "PANEL_AGENT",
+    "QUANT_AGENT",
 ]

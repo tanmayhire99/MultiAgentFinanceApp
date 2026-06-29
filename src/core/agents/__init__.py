@@ -25,6 +25,7 @@ from .claim_agent import build_claim_agent
 from .filings_agent import build_filings_agent
 from .indian_stock_agent import build_indian_stock_agent
 from .portfolio_agent import build_portfolio_agent
+from .quant_agent import build_quant_agent
 from .research_agent import build_research_agent
 from .synthesizer import build_synthesizer
 from .us_stock_agent import build_us_stock_agent
@@ -72,5 +73,6 @@ __all__ = [
     "build_claim_agent",
     "build_synthesizer",
     "build_panel_agent",
+    "build_quant_agent",
     "build_scoped_agent_for_step",
 ]
