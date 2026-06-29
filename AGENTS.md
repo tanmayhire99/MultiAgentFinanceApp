@@ -50,6 +50,20 @@ the suite runs without it.
 `evals/finlm_eval/` repo (both contain stray test files that otherwise break
 collection).
 
+## Evaluation & CI
+
+- **CI** (`.github/workflows/ci.yml`): runs `pytest` on every push to `main`
+  and every PR. Fast lane — light deps, no secrets; retrieval tests auto-skip
+  when `sentence-transformers` is absent.
+- **FinBen gate** (`.github/workflows/eval-finben.yml`): nightly + manual.
+  Runs the MMLU-Finance scorecard via NIM and fails on a regression vs
+  `evals/results/baseline.json`. Needs the `NVIDIA_API_KEY` repo secret
+  (skips cleanly without it).
+- The regression-gate logic + a deterministic numeric-accuracy eval live in
+  `evals/scorecard.py` and `tests/test_eval_gate.py`. See `evals/README.md`.
+- To move the baseline intentionally (e.g. model upgrade): run
+  `python evals/scorecard.py run` and commit the new `baseline.json` separately.
+
 ## Git identity (important)
 
 Commits here MUST be attributed to **`tanmay.hire99@gmail.com`** (GitHub:

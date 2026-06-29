@@ -4,6 +4,14 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch, MagicMock
 
+# The retrieval re-ranker depends on sentence-transformers (which pulls torch),
+# an optional/heavy dep. Skip this whole module when it isn't installed so the
+# fast CI lane stays green; the full/nightly env installs it and runs these.
+pytest.importorskip(
+    "sentence_transformers",
+    reason="optional retrieval re-ranker dep (sentence-transformers/torch)",
+)
+
 from src.mcp._retrieval import (
     _extract_year,
     deduplicate,

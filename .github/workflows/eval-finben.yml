@@ -1,0 +1,58 @@
+name: FinBen eval gate
+
+# Quality gate that needs the live model: runs the MMLU-Finance scorecard via
+# NVIDIA NIM and fails if accuracy regresses beyond tolerance vs the committed
+# baseline (evals/results/baseline.json). Kept off the per-push path because it
+# costs LLM calls + a dataset download.
+#
+# Triggered manually (Actions -> Run workflow) or nightly. Requires the
+# repo secret NVIDIA_API_KEY; skips cleanly if it's absent.
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_per_subset:
+        description: "Samples per MMLU subset"
+        default: "15"
+  schedule:
+    - cron: "0 6 * * *"  # 06:00 UTC nightly
+
+jobs:
+  finben:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install eval dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai datasets
+
+      - name: Run benchmark + regression gate
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          N_PER_SUBSET: ${{ github.event.inputs.n_per_subset || '15' }}
+        run: |
+          if [ -z "$NVIDIA_API_KEY" ]; then
+            echo "::warning::NVIDIA_API_KEY secret not set — skipping FinBen eval."
+            exit 0
+          fi
+          python evals/scorecard.py run \
+            --out evals/results/latest.json --n "$N_PER_SUBSET"
+          python evals/scorecard.py check \
+            --candidate evals/results/latest.json \
+            --baseline evals/results/baseline.json
+
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finben-scorecard
+          path: evals/results/latest.json
+          if-no-files-found: ignore
