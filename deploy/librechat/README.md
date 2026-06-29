@@ -17,13 +17,16 @@ controlled or migrated:
 ## Stand up LibreChat on a fresh machine (Ubuntu or any Docker host)
 
 ```bash
-# 1. Get upstream LibreChat (pinned to the version we built against)
+# 1. Get upstream LibreChat INSIDE this repo as LibreChat/ (it's gitignored).
+#    The override builds the finai service from `../Dockerfile`, so LibreChat
+#    must live one level below the FinAI repo root — i.e. MultiAgentFinanceApp/LibreChat/.
+cd /path/to/MultiAgentFinanceApp
 git clone https://github.com/danny-avila/LibreChat.git
 cd LibreChat && git checkout v0.8.4
 
 # 2. Drop in the FinAI customizations from this repo
-cp /path/to/MultiAgentFinanceApp/deploy/librechat/librechat.yaml .
-cp /path/to/MultiAgentFinanceApp/deploy/librechat/docker-compose.override.yml .
+cp ../deploy/librechat/librechat.yaml .
+cp ../deploy/librechat/docker-compose.override.yml .
 
 # 3. Configure env (LibreChat essentials + FinAI passthrough)
 cp .env.example .env
@@ -41,8 +44,10 @@ docker compose up -d
 #   FinAI: http://localhost:8000/health
 ```
 
-The override builds `finai` from `../Dockerfile`, so the LibreChat clone is
-expected to sit **next to** this repo, or adjust the `build.context` path.
+The override builds `finai` from `../Dockerfile`, so the LibreChat clone must
+sit **inside** the FinAI repo as `MultiAgentFinanceApp/LibreChat/` (it's
+gitignored, so this won't pollute the repo). To place it elsewhere, adjust the
+`build.context` in `docker-compose.override.yml`.
 
 ## Upgrading LibreChat
 
