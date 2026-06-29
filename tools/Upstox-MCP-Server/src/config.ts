@@ -1,3 +1,4 @@
 export const UPSTOX_CONFIG = {
-  ACCESS_TOKEN: "JWT_REDACTED"
+  // Set via env (e.g. wrangler secret / .dev.vars); never hardcode tokens.
+  ACCESS_TOKEN: process.env.UPSTOX_ACCESS_TOKEN || ""
 };

@@ -1,12 +1,14 @@
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import os
+
 import requests
 from access_token_store import save_access_token
 
-# CONFIG
-api_key = 'UPSTOX_API_KEY_REDACTED'
-secret_key = 'UPSTOX_SECRET_REDACTED'
+# CONFIG — credentials come from the environment, never hardcoded
+api_key = os.environ.get("UPSTOX_API_KEY", "")
+secret_key = os.environ.get("UPSTOX_SECRET_KEY", "")
 redirect_uri = 'http://localhost:8787/callback'
 port = 8787
 
