@@ -1,0 +1,95 @@
+# Docker Compose Override for FinAI Integration
+# This file adds FinAI service to LibreChat's Docker network
+# Documentation: https://www.librechat.ai/docs/configuration/docker_override
+
+services:
+  # Mount librechat.yaml configuration file
+  api:
+    # Pin LibreChat to stable v0.8.4 instead of the rolling `:latest` tag
+    # in the upstream docker-compose.yml. `registry.librechat.ai/...librechat-dev:latest`
+    # tracks LibreChat's main branch (currently v0.8.5-rc1); the semver-
+    # tagged stable images live on `ghcr.io/danny-avila/librechat:<tag>`
+    # (the full image, which is what the upstream compose normally uses).
+    # We avoid `librechat-api:<tag>` because that minimal image does not
+    # auto-load `/app/.env`, and our stack bind-mounts that file. Override
+    # the tag here when moving to a newer version.
+    image: ghcr.io/danny-avila/librechat:v0.8.4
+    volumes:
+      - type: bind
+        source: ./librechat.yaml
+        target: /app/librechat.yaml
+    depends_on:
+      - finai
+
+  # Add FinAI Multi-Agent Financial Advisor service
+  finai:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+    container_name: finai-api
+    restart: unless-stopped
+    
+    # Connect to LibreChat's network
+    networks:
+      - default
+    
+    # Expose port for direct access (optional, for debugging)
+    ports:
+      - "8000:8000"
+    
+    # Bind-mount the response cache so:
+    #  - Cache files are visible/editable on the host
+    #  - Cache survives `docker compose up --build` (unlike baked-in COPY)
+    #  - A successful run "warms" the cache for subsequent demo runs,
+    #    so transient NIM stream failures fall back to the last good
+    #    per-persona response instead of crashing the whole flow.
+    volumes:
+      - ../data/response_cache:/app/data/response_cache
+    
+    # Environment variables
+    # Primary + numbered NVIDIA API keys (1..4) so each persona can be
+    # pinned to its own key at runtime - NIM rate-limits + serialises
+    # concurrent streams per key, so this is what unlocks real-time
+    # multi-persona streaming.
+    environment:
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - NVIDIA_API_KEY_1=${NVIDIA_API_KEY_1:-}
+      - NVIDIA_API_KEY_2=${NVIDIA_API_KEY_2:-}
+      - NVIDIA_API_KEY_3=${NVIDIA_API_KEY_3:-}
+      - NVIDIA_API_KEY_4=${NVIDIA_API_KEY_4:-}
+      # Override the default model without rebuilding, e.g. to "openai/gpt-oss-120b"
+      # or "meta/llama-3.1-8b-instruct". See src/personas/base.py for the
+      # benchmark table. Leave empty to use the in-code default.
+      - NVIDIA_MODEL=${NVIDIA_MODEL:-}
+      # Optional web-search upgrade for the Research Agent. Leave empty
+      # to use the DuckDuckGo fallback (free, no key).
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # FINAI_PLANNER_PREFIX is retained for backward compatibility but
+      # is now a no-op — all queries route through the planner-first
+      # pipeline by default.
+      - FINAI_PLANNER_PREFIX=${FINAI_PLANNER_PREFIX:-1}
+      # Verbose dev-trace classification card. 0 = hidden by default
+      # (production behaviour); set to 1 globally or use /trace on a
+      # single message to surface it.
+      - FINAI_VERBOSE_TRACE=${FINAI_VERBOSE_TRACE:-0}
+      - LOG_LEVEL=INFO
+      - PORT=8000
+      - HOST=0.0.0.0
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M

@@ -38,6 +38,11 @@ uv pip install --python .venv-mac/bin/python \
 re-ranker (`src/mcp/_retrieval.py`) and `tests/test_retrieval.py`; the rest of
 the suite runs without it.
 
+`.venv-mac` is the macOS dev convention; on Linux use `uv venv .venv && uv sync`
+(the committed env is Linux-targeted). **Deploying or migrating to Ubuntu? See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** for the full end-to-end runbook, and
+[`deploy/librechat/`](deploy/librechat/) for the LibreChat config + upgrade path.
+
 ## Tests
 
 ```bash
