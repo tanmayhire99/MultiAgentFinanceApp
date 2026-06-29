@@ -18,7 +18,7 @@ from openai import OpenAI
 # ==========================================
 # Configuration
 # ==========================================
-API_KEY = "nvapi-REDACTED-ROTATE-THIS-KEY"
+API_KEY = os.environ.get("NVIDIA_API_KEY", "")  # never hardcode secrets; set via env
 
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 MODEL = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
