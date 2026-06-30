@@ -356,15 +356,15 @@ class CanonicalPolicyGateTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 class CanonicalRegistryInvariantTests(unittest.TestCase):
     def test_tool_count_matches_mcp_namespacing(self):
-        # The 8 agents collectively own exactly 37 tools — the same total
+        # The 8 agents collectively own exactly 38 tools — the same total
         # as what mcp_servers.get_tools() returns. If this fails the
         # registry got out of sync with the MCP workers.
         all_tools = set()
         for a in REGISTRY:
             all_tools.update(a.tools)
         self.assertEqual(
-            len(all_tools), 37,
-            f"Expected 37 namespaced MCP tools across the registry, "
+            len(all_tools), 38,
+            f"Expected 38 namespaced MCP tools across the registry, "
             f"got {len(all_tools)}. Tools: {sorted(all_tools)}",
         )
 

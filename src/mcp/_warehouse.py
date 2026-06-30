@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 import os
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 log = logging.getLogger("finai.warehouse")
 
@@ -139,6 +140,61 @@ def get_history(
     )
 
 
+_SMA_WINDOWS = (20, 50, 200)
+_RETURN_WINDOWS = {"return_1m_pct": 21, "return_3m_pct": 63, "return_6m_pct": 126}
+
+
+def _compute_technicals(series: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Derive SMA(20/50/200), trailing returns, annualised volatility and max
+    drawdown from a chronological (oldest-first) close series in native INR.
+
+    Mirrors ``equity-pipeline/pipeline/technicals.py`` — the projects are
+    decoupled (FinAI reads the warehouse's analytics layer over SQL, never
+    importing its code), so the small pure computation is duplicated rather than
+    shared. Currency conversion happens in the MCP tool, not here.
+    """
+    closes = [float(r["close"]) for r in series if r.get("close") is not None]
+    n = len(closes)
+    out: Dict[str, Any] = {"data_points": n, "latest_close": closes[-1] if closes else None}
+    if n == 0:
+        return out
+    for w in _SMA_WINDOWS:
+        out[f"sma_{w}"] = round(sum(closes[-w:]) / w, 4) if n >= w else None
+    sma_50 = out.get("sma_50")
+    out["trend_vs_sma_50"] = None if sma_50 is None else ("above" if closes[-1] >= sma_50 else "below")
+    for key, k in _RETURN_WINDOWS.items():
+        out[key] = round((closes[-1] / closes[-1 - k] - 1) * 100, 2) if n > k and closes[-1 - k] else None
+    daily = [closes[i] / closes[i - 1] - 1 for i in range(1, n) if closes[i - 1]]
+    if len(daily) >= 2:
+        mean = sum(daily) / len(daily)
+        var = sum((r - mean) ** 2 for r in daily) / (len(daily) - 1)
+        out["annualized_volatility_pct"] = round(math.sqrt(var) * math.sqrt(252) * 100, 2)
+    else:
+        out["annualized_volatility_pct"] = None
+    peak, mdd = closes[0], 0.0
+    for c in closes:
+        peak = max(peak, c)
+        if peak > 0:
+            mdd = min(mdd, c / peak - 1)
+    out["max_drawdown_pct"] = round(mdd * 100, 2)
+    return out
+
+
+def get_technicals(ticker: str, lookback_days: int = 400) -> Optional[Dict[str, Any]]:
+    """Derived technicals for an NSE ticker (native INR), or None.
+
+    Fetches the close series via :func:`get_history` (the warehouse analytics
+    layer) and computes indicators locally. SMA / latest_close are in INR; the
+    MCP tool converts those to USD. Returns/volatility/drawdown are percentages.
+    """
+    to_date = dt.date.today()
+    rows = get_history(ticker, to_date - dt.timedelta(days=lookback_days), to_date)
+    if not rows:
+        return None
+    return {"ticker": _bare(ticker), "as_of": rows[-1].get("trade_date"),
+            "lookback_days": lookback_days, **_compute_technicals(rows)}
+
+
 def get_top_movers(limit: int = 10) -> Optional[List[Dict[str, Any]]]:
     """Top gainers over the trailing 30 days across the warehouse universe."""
     return _query(
@@ -169,6 +225,7 @@ __all__ = [
     "is_available",
     "get_quote",
     "get_history",
+    "get_technicals",
     "get_top_movers",
     "get_sector_performance",
 ]

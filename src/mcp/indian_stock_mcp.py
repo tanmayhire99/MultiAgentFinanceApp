@@ -313,6 +313,49 @@ def get_price_history(ticker: str, days: int = 30) -> Dict[str, Any]:
 
 
 @mcp.tool
+def get_technicals(ticker: str) -> Dict[str, Any]:
+    """Derived technical indicators for an NSE ticker from the equity-pipeline
+    warehouse (official NSE bhavcopy EOD): simple moving averages (20/50/200),
+    trailing 1m/3m/6m returns, annualised volatility, max drawdown, and trend vs
+    the 50-day SMA — computed over ~400 calendar days of warehoused closes.
+
+    SMA values and the latest close are converted INR → USD; returns, volatility
+    and drawdown are currency-invariant percentages and pass through unchanged.
+
+    Warehouse-only: returns a notice if the warehouse isn't configured or the
+    ticker isn't in its NIFTY-50 universe.
+    """
+    if not _warehouse.is_available():
+        return {"ticker": ticker.upper(), **_WAREHOUSE_OFF}
+    t = _warehouse.get_technicals(ticker)
+    if not t:
+        return {
+            "ticker": ticker.upper(),
+            "error": "no warehouse history (not in the NIFTY-50 universe?)",
+            "_source": "warehouse:equity-pipeline",
+        }
+    return {
+        "ticker": t["ticker"],
+        "as_of": t.get("as_of"),
+        "currency": "USD",
+        "native_currency": "INR",
+        "fx_rate_usd_per_inr": round(_live.USD_PER_INR, 6),
+        "data_points": t.get("data_points"),
+        "latest_close": _inr_to_usd(t.get("latest_close")),
+        "sma_20": _inr_to_usd(t.get("sma_20")),
+        "sma_50": _inr_to_usd(t.get("sma_50")),
+        "sma_200": _inr_to_usd(t.get("sma_200")),
+        "trend_vs_sma_50": t.get("trend_vs_sma_50"),
+        "return_1m_pct": t.get("return_1m_pct"),
+        "return_3m_pct": t.get("return_3m_pct"),
+        "return_6m_pct": t.get("return_6m_pct"),
+        "annualized_volatility_pct": t.get("annualized_volatility_pct"),
+        "max_drawdown_pct": t.get("max_drawdown_pct"),
+        "_source": "warehouse:equity-pipeline",
+    }
+
+
+@mcp.tool
 def get_top_movers(limit: int = 10) -> Dict[str, Any]:
     """Top gainers over the trailing 30 days across the NIFTY-50 universe, from
     the equity-pipeline warehouse. Prices converted INR → USD; returns are %.

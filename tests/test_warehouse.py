@@ -171,6 +171,68 @@ class WarehouseToolTests(unittest.TestCase):
         with self._off():
             self.assertEqual(indian_stock_mcp.get_sector_performance()["_source"], "none")
 
+    # -- get_technicals --
+    def test_technicals_notice_when_off(self):
+        with self._off():
+            out = indian_stock_mcp.get_technicals("RELIANCE")
+        self.assertEqual(out["_source"], "none")
+
+    def test_technicals_maps_and_converts(self):
+        # SMA + latest close convert INR->USD; %s pass through untouched.
+        tech = {
+            "ticker": "RELIANCE", "as_of": "2026-06-29", "lookback_days": 400,
+            "data_points": 256, "latest_close": 1700.0, "sma_20": 1700.0,
+            "sma_50": 1700.0, "sma_200": None, "trend_vs_sma_50": "below",
+            "return_1m_pct": -3.67, "return_3m_pct": -7.59, "return_6m_pct": -16.87,
+            "annualized_volatility_pct": 20.79, "max_drawdown_pct": -20.94,
+        }
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_technicals", return_value=tech):
+            out = indian_stock_mcp.get_technicals("RELIANCE.NS")
+        self.assertEqual(out["_source"], "warehouse:equity-pipeline")
+        self.assertEqual(out["currency"], "USD")
+        self.assertEqual(out["sma_20"], indian_stock_mcp._inr_to_usd(1700.0))
+        self.assertIsNone(out["sma_200"])                 # None passes through
+        self.assertEqual(out["trend_vs_sma_50"], "below")  # not currency
+        self.assertEqual(out["annualized_volatility_pct"], 20.79)
+        self.assertEqual(out["max_drawdown_pct"], -20.94)
+        self.assertEqual(out["data_points"], 256)
+
+    def test_technicals_empty(self):
+        with self._on(), patch.object(indian_stock_mcp._warehouse, "get_technicals", return_value=None):
+            out = indian_stock_mcp.get_technicals("ZZZ")
+        self.assertIn("no warehouse history", out["error"])
+
+
+class WarehouseComputeTechnicalsTests(unittest.TestCase):
+    """The pure compute_technicals helper (no DB)."""
+
+    def test_increasing_series(self):
+        rows = [{"close": float(x)} for x in range(1, 201)]
+        out = _warehouse._compute_technicals(rows)
+        self.assertEqual(out["sma_20"], 190.5)
+        self.assertEqual(out["sma_50"], 175.5)
+        self.assertEqual(out["sma_200"], 100.5)
+        self.assertEqual(out["trend_vs_sma_50"], "above")
+        self.assertEqual(out["max_drawdown_pct"], 0.0)
+
+    def test_partial_history(self):
+        out = _warehouse._compute_technicals([{"close": float(x)} for x in range(1, 31)])
+        self.assertIsNotNone(out["sma_20"])
+        self.assertIsNone(out["sma_50"])
+        self.assertIsNone(out["sma_200"])
+
+    def test_get_technicals_uses_history(self):
+        rows = [{"trade_date": "2026-06-29", "close": float(x)} for x in range(1, 60)]
+        with patch.object(_warehouse, "get_history", return_value=rows):
+            out = _warehouse.get_technicals("RELIANCE.NS")
+        self.assertEqual(out["ticker"], "RELIANCE")     # bare symbol
+        self.assertEqual(out["as_of"], "2026-06-29")
+        self.assertEqual(out["data_points"], 59)
+
+    def test_get_technicals_none_without_history(self):
+        with patch.object(_warehouse, "get_history", return_value=None):
+            self.assertIsNone(_warehouse.get_technicals("ZZZ"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

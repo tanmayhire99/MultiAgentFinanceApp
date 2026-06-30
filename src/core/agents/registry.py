@@ -489,6 +489,7 @@ INDIAN_STOCK_AGENT = AgentDefinition(
         "indian_stock__get_moat_signals",
         "indian_stock__list_supported_tickers",
         "indian_stock__get_price_history",
+        "indian_stock__get_technicals",
         "indian_stock__get_top_movers",
         "indian_stock__get_sector_performance",
     ),
