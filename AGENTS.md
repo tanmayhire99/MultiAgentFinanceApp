@@ -106,6 +106,23 @@ goals) + recent topic notes.
   guarded so a memory failure can never break an answer.
 - Tests: `tests/test_memory.py` (unit + planner/ScopedAgent integration).
 
+## Event-driven portfolio alerts
+
+`src/core/alerts.py` is the foundation for proactive engagement (the product's
+"tell me when something about *my* holdings changes"): a durable per-user alert
+store (SQLite, `data/finai_alerts.db`, gitignored; `FINAI_ALERTS_DB` to override)
+plus **pure rule functions** (`concentration_alerts`, `price_move_alerts`) that
+take plain dicts and return `Alert`s, so they're trivially unit-tested.
+
+- `scan_user()` runs the rules; `scan_and_store()` persists with de-duplication
+  (a repeated scan of an unchanged condition doesn't spam — `dedup_key` within a
+  7-day window). `run_scan(user_id)` is the side-effectful adapter that pulls
+  holdings from `src/mcp/portfolio_mcp.py`.
+- CLI for a scheduler/cron: `python -m src.core.alerts <user_id>`.
+- Next wiring (not yet done): an authed `/alerts` endpoint + unread badge in the
+  UI, and a `changes` (day-move) feed so `price_move` alerts fire live.
+- Tests: `tests/test_alerts.py`.
+
 ## Git identity (important)
 
 Commits here MUST be attributed to **`tanmay.hire99@gmail.com`** (GitHub:

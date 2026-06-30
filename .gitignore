@@ -27,6 +27,10 @@ data/response_cache/*.json
 data/finai_memory.db
 data/finai_memory.db-*
 
+# Event-driven portfolio alerts store (SQLite; per-deployment user state)
+data/finai_alerts.db
+data/finai_alerts.db-*
+
 # Agent / editor tool config
 .claude/
 
