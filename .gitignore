@@ -23,6 +23,10 @@ FinanceApp.tar.gz
 data/response_cache/*.json
 /test.py
 
+# Persistent per-user memory store (SQLite; per-deployment user state)
+data/finai_memory.db
+data/finai_memory.db-*
+
 # Agent / editor tool config
 .claude/
 

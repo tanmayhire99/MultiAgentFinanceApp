@@ -86,6 +86,26 @@ are opt-in (env-gated) so FinAI runs standalone by default.
   hard boundary in `automated-trading/docs/CONTEXT.md` is preserved.
   When unset, the quant agent + server are absent (registry stays at 37 tools).
 
+## Persistent per-user memory
+
+`src/core/memory.py` is the system's long-term memory (the #1 demo→product gap):
+a SQLite store (`data/finai_memory.db`, gitignored; override via `FINAI_MEMORY_DB`)
+keyed by `user_id`, holding a structured profile (risk tolerance / horizon /
+goals) + recent topic notes.
+
+- **Recall** happens at prompt-build time: `run_pipeline` feeds `memory.recall()`
+  into the planner, and `ScopedAgent._with_user_memory` appends the same block to
+  **every** agent's system prompt (including the synthesizer's override) at the
+  single `self.system_prompt` assignment point.
+- **Observe** happens once per turn at the end of `run_pipeline`
+  (`memory.observe(user_id, query, answer)`); extraction is deterministic and
+  conservative (no extra LLM call) and lives in `_extract_profile_signals` so an
+  LLM extractor can be swapped in later.
+- Active **only for authenticated users** — the shared `demo` / `anonymous`
+  identities are never stored (`memory.is_real_user`). Every entry point is
+  guarded so a memory failure can never break an answer.
+- Tests: `tests/test_memory.py` (unit + planner/ScopedAgent integration).
+
 ## Git identity (important)
 
 Commits here MUST be attributed to **`tanmay.hire99@gmail.com`** (GitHub:

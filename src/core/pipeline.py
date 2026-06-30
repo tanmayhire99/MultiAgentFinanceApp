@@ -38,6 +38,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Sequence
 
 from langchain_core.tools import BaseTool
 
+from src.core import memory
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.executor import execute as execute_plan
 from src.core.joiner import decide as joiner_decide
@@ -88,6 +89,13 @@ async def run_pipeline(
     yield _status(f"Planning a multi-agent investigation for: _{query.strip()}_")
     started = time.time()
 
+    # Persistent per-user memory: recall what we durably know so the plan (and,
+    # via ScopedAgent, every downstream agent) personalises. Guarded — returns
+    # "" for the demo/unauthenticated user and never raises.
+    user_memory = memory.recall(user_id, query)
+    if user_memory:
+        yield _status("Recalled this user's saved context (risk profile / prior topics).")
+
     # 1) Phase 2: Plan
     try:
         plan_obj: Plan = await build_plan(
@@ -95,6 +103,7 @@ async def run_pipeline(
             intent_flags=intent_flags,
             registry=registry,
             history_summary=history_summary,
+            user_memory=user_memory,
             timeout_seconds=DEFAULT_PLANNER_TIMEOUT,
         )
     except PlannerError as e:
@@ -213,6 +222,10 @@ async def run_pipeline(
         log.exception("verify_numbers failed; using unverified text")
 
     yield {"type": "text", "text": final_text, "persona": "synthesizer"}
+
+    # Persist what we learned this turn (profile signals + topic). Guarded — a
+    # no-op for the demo/unauthenticated user and never raises into the stream.
+    memory.observe(user_id, query, final_text)
 
     duration = time.time() - started
     replan_info = ""

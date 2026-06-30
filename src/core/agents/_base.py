@@ -70,6 +70,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
+from src.core import memory
 from src.core.agents.registry import REGISTRY, AgentRegistry
 from src.core.panel import PanelEvent
 from src.core.types import PlanStep, Scratchpad, StepResult
@@ -220,12 +221,16 @@ class ScopedAgent:
         # 3) Construct synthetic tools (closure over self for scratchpad/step)
         self.synthetic_tools = self._build_synthetic_tools()
 
-        # 4) Build the system prompt (or use the factory-supplied override)
-        self.system_prompt = (
+        # 4) Build the system prompt (or use the factory-supplied override),
+        #    then append the user's persistent-memory block. Doing it here — at
+        #    the single assignment point — means every agent personalises,
+        #    including the synthesizer (which supplies its own override).
+        base_prompt = (
             system_prompt_override
             if system_prompt_override is not None
             else self._build_system_prompt()
         )
+        self.system_prompt = self._with_user_memory(base_prompt)
 
         # 5) Compile the ReAct graph
         self._compiled = create_react_agent(
@@ -518,6 +523,22 @@ class ScopedAgent:
             ),
             args_schema=_RunPythonArgs,
         )
+
+    def _with_user_memory(self, prompt: str) -> str:
+        """Append the user's persistent-memory block (if any) to a system prompt.
+
+        ``memory.recall`` is fully guarded: it returns "" for the demo /
+        unauthenticated identities and never raises, so memory can never break
+        prompt construction. The block is query-relevance-ordered when possible.
+        """
+        try:
+            block = memory.recall(
+                self.user_id, query=getattr(self.scratchpad, "query", None)
+            )
+        except Exception:  # defensive: memory is an enhancement, never a hard dep
+            log.exception("memory.recall raised during prompt build; continuing without it")
+            block = ""
+        return f"{prompt}\n\n{block}" if block else prompt
 
     def _build_system_prompt(self) -> str:
         """Render the system prompt: task + scope rules + agent directory.

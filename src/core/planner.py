@@ -550,8 +550,15 @@ def _build_system_prompt(
     )
 
 
-def _build_user_message(query: str, history_summary: Optional[str] = None) -> str:
+def _build_user_message(
+    query: str,
+    history_summary: Optional[str] = None,
+    user_memory: Optional[str] = None,
+) -> str:
     parts = [f"User query: {query.strip()}"]
+    if user_memory:
+        parts.append("")
+        parts.append(user_memory.strip())
     if history_summary:
         parts.append("")
         parts.append(f"Prior turn context: {history_summary.strip()}")
@@ -609,6 +616,7 @@ async def plan(
     intent_flags: Dict[str, bool],
     registry: AgentRegistry = REGISTRY,
     history_summary: Optional[str] = None,
+    user_memory: Optional[str] = None,
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     retries: int = DEFAULT_RETRIES,
 ) -> Plan:
@@ -625,7 +633,7 @@ async def plan(
     Raises :class:`PlannerError` on any unrecoverable failure.
     """
     system_prompt = _build_system_prompt(intent_flags, registry)
-    user_message = _build_user_message(query, history_summary)
+    user_message = _build_user_message(query, history_summary, user_memory)
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_message),
