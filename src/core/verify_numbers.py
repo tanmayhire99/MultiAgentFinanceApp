@@ -63,6 +63,7 @@ class NumberClaim:
     status: VerifyStatus = VerifyStatus.UNVERIFIED
     matched_scratchpad_value: Optional[float] = None
     matched_step_id: Optional[int] = None
+    unit_str: str = ""  # the unit suffix as written ("B", "%", "crore"); "" if none
 
 
 @dataclass
@@ -80,6 +81,13 @@ class VerifyResult:
     @property
     def has_flags(self) -> bool:
         return self.flagged_count > 0
+
+    @property
+    def summary(self) -> str:
+        """Compact one-line verification badge for status lines / the UI."""
+        return (f"{self.verified_count} verified ✓ · "
+                f"{self.unverified_count} unverified · "
+                f"{self.flagged_count} flagged ✗")
 
 
 _DEFAULT_REL_TOL = 0.02
@@ -189,6 +197,7 @@ def extract_number_claims(text: str) -> List[NumberClaim]:
             span_start=start,
             span_end=end,
             status=VerifyStatus.UNVERIFIED,
+            unit_str=unit_str,
         ))
 
     # Pass 2: numbers with currency prefix
@@ -535,11 +544,33 @@ def _nearest_metric_keyword(text: str) -> Optional[str]:
     return None
 
 
-_BADGE = {
-    VerifyStatus.VERIFIED: " ✓",
-    VerifyStatus.UNVERIFIED: "",
-    VerifyStatus.FLAGGED: " ✗",
-}
+def _format_source_value(claim: NumberClaim) -> str:
+    """Render the contradicting scratchpad value in the claim's own unit scale.
+
+    e.g. a claim of "2.5B" contradicted by 1.23e9 renders as "1.23B"; "15%"
+    contradicted by 18.0 renders as "18%"; a bare 1.23e9 renders "1,230,000,000".
+    """
+    v = claim.matched_scratchpad_value
+    if v is None:
+        return ""
+    mult = claim.unit_multiplier or 1.0
+    scaled = v / mult
+    if not claim.unit_str and abs(scaled) >= 1000:
+        body = f"{scaled:,.0f}"
+    else:
+        body = f"{scaled:.2f}".rstrip("0").rstrip(".")
+    return f"{body}{claim.unit_str}"
+
+
+def _badge_for(claim: NumberClaim) -> str:
+    """Per-claim inline badge. Flagged claims surface the source figure so the
+    reader sees claimed-vs-actual (we never silently rewrite the number)."""
+    if claim.status == VerifyStatus.VERIFIED:
+        return " ✓"
+    if claim.status == VerifyStatus.FLAGGED:
+        src = _format_source_value(claim)
+        return f" ✗ (source data: {src})" if src else " ✗"
+    return ""
 
 
 def _annotate_text(text: str, claims: List[NumberClaim]) -> str:
@@ -555,28 +586,31 @@ def _annotate_text(text: str, claims: List[NumberClaim]) -> str:
     sorted_claims = sorted(claims, key=lambda c: c.span_start, reverse=True)
 
     for claim in sorted_claims:
-        badge = _BADGE.get(claim.status, "")
+        badge = _badge_for(claim)
         if not badge:
             continue
-
         insert_pos = min(claim.span_end, len(result))
         result = result[:insert_pos] + badge + result[insert_pos:]
 
-    if any(c.status == VerifyStatus.FLAGGED for c in claims):
-        footer = (
+    verified = sum(1 for c in claims if c.status == VerifyStatus.VERIFIED)
+    flagged = sum(1 for c in claims if c.status == VerifyStatus.FLAGGED)
+    unverified = len(claims) - verified - flagged
+
+    if flagged:
+        result += (
             "\n\n---\n"
-            "⚠ **Number verification**: ✓ = confirmed against source data, "
-            "✗ = contradicts source data. "
+            f"⚠ **Number check:** {verified} verified ✓ · {unverified} unverified · "
+            f"{flagged} flagged ✗. ✓ = confirmed against source data; "
+            "✗ = contradicts source data (the source figure is shown next to it). "
             "Unmarked numbers could not be independently verified.\n"
         )
-        result += footer
-    elif any(c.status == VerifyStatus.VERIFIED for c in claims):
-        footer = (
+    elif verified:
+        result += (
             "\n\n---\n"
-            "✓ **Number verification**: ✓ = confirmed against source data. "
+            f"✓ **Number check:** {verified} verified ✓ · {unverified} unverified. "
+            "✓ = confirmed against source data. "
             "Unmarked numbers could not be independently verified.\n"
         )
-        result += footer
 
     return result
 

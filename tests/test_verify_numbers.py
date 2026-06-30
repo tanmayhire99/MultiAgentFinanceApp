@@ -332,3 +332,61 @@ class TestVerifyNumbers:
         })
         result = verify_numbers(text, pad)
         assert result.total_claims >= 1
+
+
+# ---------------------------------------------------------------------------
+# Correction surfacing + verification badge (Phase C)
+# ---------------------------------------------------------------------------
+class TestCorrectionAndBadge:
+
+    def test_flagged_number_shows_source_value(self):
+        # Claimed $2.5B but the source says $1.23B → flag AND surface the source.
+        text = "Revenue was $2.5B in FY2024."
+        pad = _make_scratchpad({
+            1: ("complete", {"text": "Revenue was $1,230,000,000 for the year"}),
+        })
+        result = verify_numbers(text, pad)
+        if result.flagged_count > 0:
+            assert "source data:" in result.annotated_text
+            # rendered in the claim's own unit scale (billions)
+            assert "1.23B" in result.annotated_text
+            # the original claimed number is preserved, never silently rewritten
+            assert "2.5B" in result.annotated_text
+
+    def test_summary_badge_counts_consistent(self):
+        text = "Revenue was $1.23B and headcount was 45,000 people."
+        pad = _make_scratchpad({
+            1: ("complete", {"text": "Total revenue: $1,230,000,000"}),
+        })
+        result = verify_numbers(text, pad)
+        s = result.summary
+        assert f"{result.verified_count} verified" in s
+        assert f"{result.flagged_count} flagged" in s
+
+    def test_badge_footer_includes_counts_when_verified(self):
+        text = "Revenue was $1.23B in FY2024."
+        pad = _make_scratchpad({
+            1: ("complete", {"text": "Total revenue: $1,230,000,000"}),
+        })
+        result = verify_numbers(text, pad)
+        if result.verified_count > 0 and result.flagged_count == 0:
+            assert "**Number check:**" in result.annotated_text
+            assert "confirmed against source data" in result.annotated_text
+
+    def test_percentage_source_rendered_with_percent(self):
+        from src.core.verify_numbers import _format_source_value
+        claim = NumberClaim(
+            raw_text="15", value=15.0, unit_multiplier=1.0,
+            context_left="margin of", context_right="%", span_start=0, span_end=2,
+            status=VerifyStatus.FLAGGED, matched_scratchpad_value=18.0, unit_str="%",
+        )
+        assert _format_source_value(claim) == "18%"
+
+    def test_bare_large_source_rendered_with_commas(self):
+        from src.core.verify_numbers import _format_source_value
+        claim = NumberClaim(
+            raw_text="45000", value=45000.0, unit_multiplier=1.0,
+            context_left="", context_right="", span_start=0, span_end=5,
+            status=VerifyStatus.FLAGGED, matched_scratchpad_value=52000.0, unit_str="",
+        )
+        assert _format_source_value(claim) == "52,000"

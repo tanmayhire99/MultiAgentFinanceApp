@@ -212,11 +212,7 @@ async def run_pipeline(
                 "verify_numbers: %d flagged claims in synthesizer output",
                 verify_result.flagged_count,
             )
-        yield _status(
-            f"Number verification: {verify_result.verified_count} ✓, "
-            f"{verify_result.unverified_count} unverified, "
-            f"{verify_result.flagged_count} ✗"
-        )
+        yield _status(f"Number check — {verify_result.summary}")
         final_text = verify_result.annotated_text
     except Exception:
         log.exception("verify_numbers failed; using unverified text")
