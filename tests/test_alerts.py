@@ -124,5 +124,44 @@ def test_run_scan_uses_holdings(alert_db, monkeypatch):
     assert alerts.list_alerts("u1")[0]["ticker"] == "NVDA"
 
 
+# ---------------------------------------------------------------------------
+# Live day-move feed
+# ---------------------------------------------------------------------------
+def test_fetch_day_changes_builds_map_and_skips_none():
+    holdings = [{"ticker": "NVDA"}, {"ticker": "AAPL"}, {"ticker": "KO"}, {"weight": 1}]
+    qf = lambda t, h: {"NVDA": -6.0, "AAPL": 1.0}.get(t)  # KO -> None; no-ticker skipped
+    assert alerts.fetch_day_changes(holdings, qf) == {"NVDA": -6.0, "AAPL": 1.0}
+
+
+def test_run_scan_with_quote_fn_fires_price_alerts(alert_db, monkeypatch):
+    fake = types.ModuleType("src.mcp.portfolio_mcp")
+    fake.get_holdings = lambda user_id="demo": {"holdings": _HOLDINGS}
+    monkeypatch.setitem(sys.modules, "src.mcp.portfolio_mcp", fake)
+    qf = lambda t, h=None: -7.0 if t == "NVDA" else 0.5   # NVDA dumps 7%
+    alerts.run_scan("u1", quote_fn=qf)
+    kinds = {a["kind"] for a in alerts.list_alerts("u1")}
+    assert "price_move" in kinds and "concentration" in kinds
+
+
+def test_live_quote_change_us_reads_change_pct(monkeypatch):
+    from src.mcp import us_stock_mcp
+    monkeypatch.setattr(us_stock_mcp, "get_quote", lambda t: {"change_pct_1d": 6.2})
+    pct = alerts.live_quote_change("NVDA", {"exchange": "NASDAQ", "country": "United States"})
+    assert pct == 6.2
+
+
+def test_live_quote_change_nse_uses_warehouse_history(monkeypatch):
+    from src.mcp import _warehouse
+    monkeypatch.setattr(_warehouse, "get_history",
+                        lambda t, *a, **k: [{"close": 100.0}, {"close": 105.0}])
+    assert alerts.live_quote_change("INFY", {"exchange": "NSE"}) == 5.0
+
+
+def test_live_quote_change_returns_none_on_miss(monkeypatch):
+    from src.mcp import us_stock_mcp
+    monkeypatch.setattr(us_stock_mcp, "get_quote", lambda t: {"error": "no data"})
+    assert alerts.live_quote_change("ZZZZ", {}) is None
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

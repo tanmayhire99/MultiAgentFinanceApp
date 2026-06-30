@@ -122,9 +122,13 @@ take plain dicts and return `Alert`s, so they're trivially unit-tested.
 - **HTTP API** (authed, same JWT gate as chat): `GET /alerts` (list +
   `unread_count` for a UI badge), `POST /alerts/scan` (rate-limited),
   `POST /alerts/mark-read` (`{alert_id}` or all). See `src/app.py`.
-- Next wiring (not yet done): a `changes` (day-move) feed so `price_move` alerts
-  fire live, and an unread badge in the LibreChat UI.
-- Tests: `tests/test_alerts.py` (unit) + `tests/test_alerts_api.py` (endpoints).
+- **Live day-move feed**: `POST /alerts/scan` (and the CLI by default) build a
+  per-holding 1-day change map via `live_quote_change` — routed by venue (NSE →
+  warehouse last-two-closes; else → US live quote `change_pct_1d`) — so
+  `price_move` alerts fire for real. The `quote_fn` is a seam, so the scan stays
+  offline/deterministic in tests; `--no-live` skips it on the CLI.
+- Next wiring (not yet done): an unread badge in the LibreChat UI.
+- Tests: `tests/test_alerts.py` (unit incl. live feed) + `tests/test_alerts_api.py`.
 
 ## Git identity (important)
 

@@ -230,12 +230,66 @@ def scan_and_store(user_id: str, **kwargs) -> List[int]:
     return ids
 
 
-def run_scan(user_id: str, changes: Optional[Dict[str, float]] = None) -> List[int]:
+def live_quote_change(ticker: str, holding: Optional[dict] = None) -> Optional[float]:
+    """Best-effort 1-day percent change for a held ticker (the live feed).
+
+    Routes by venue: NSE / India holdings use the equity-pipeline warehouse
+    (computed from the last two closes — currency-invariant), everything else
+    uses the US live quote's ``change_pct_1d``. Returns None on any miss so a
+    single unfetchable ticker never breaks the scan. Imports are lazy to keep
+    ``alerts`` importable without the MCP stack.
+    """
+    holding = holding or {}
+    exchange = str(holding.get("exchange") or "").upper()
+    country = str(holding.get("country") or "").upper()
+    try:
+        if exchange == "NSE" or country in ("INDIA", "IN") or ticker.upper().endswith(".NS"):
+            from src.mcp import _warehouse
+
+            hist = _warehouse.get_history(ticker)
+            if hist and len(hist) >= 2:
+                prev, last = hist[-2].get("close"), hist[-1].get("close")
+                if prev and last:
+                    return round((float(last) / float(prev) - 1) * 100, 2)
+            return None
+        from src.mcp import us_stock_mcp
+
+        quote = us_stock_mcp.get_quote(ticker)
+        pct = quote.get("change_pct_1d") if isinstance(quote, dict) else None
+        return round(float(pct), 2) if pct is not None else None
+    except Exception:
+        log.exception("live_quote_change failed for %s", ticker)
+        return None
+
+
+def fetch_day_changes(holdings: List[dict], quote_fn) -> Dict[str, float]:
+    """Build a ticker -> 1d-percent-change map by calling ``quote_fn`` per holding.
+
+    Pure orchestration over the ``quote_fn`` seam (tests inject a fake); tickers
+    whose change can't be fetched are simply omitted.
+    """
+    changes: Dict[str, float] = {}
+    for h in holdings:
+        ticker = h.get("ticker")
+        if not ticker:
+            continue
+        try:
+            pct = quote_fn(ticker, h)
+        except Exception:
+            log.exception("quote_fn raised for %s", ticker)
+            pct = None
+        if pct is not None:
+            changes[ticker] = float(pct)
+    return changes
+
+
+def run_scan(user_id: str, changes: Optional[Dict[str, float]] = None, quote_fn=None) -> List[int]:
     """Fetch the user's live holdings and scan them. Side-effectful adapter.
 
-    Pulls holdings from the portfolio MCP tool; ``changes`` (day moves) may be
-    supplied by the caller (e.g. a scheduler that fetched quotes) — the price
-    rule is skipped when it's absent. Never raises into the caller.
+    Pulls holdings from the portfolio MCP tool. Day moves come from, in order:
+    an explicit ``changes`` map; else a ``quote_fn`` live feed (e.g.
+    :func:`live_quote_change`) fetched per holding; else nothing (price rule
+    skipped). Never raises into the caller.
     """
     try:
         from src.mcp.portfolio_mcp import get_holdings
@@ -245,6 +299,8 @@ def run_scan(user_id: str, changes: Optional[Dict[str, float]] = None) -> List[i
     except Exception:
         log.exception("run_scan: could not load holdings for %s", user_id)
         return []
+    if changes is None and quote_fn is not None:
+        changes = fetch_day_changes(holdings, quote_fn)
     return scan_and_store(user_id, holdings=holdings, changes=changes)
 
 
@@ -253,8 +309,10 @@ def _main(argv: Optional[List[str]] = None) -> int:
 
     p = argparse.ArgumentParser(description="Scan a user's portfolio for alerts.")
     p.add_argument("user_id")
+    p.add_argument("--no-live", action="store_true",
+                   help="skip the live day-move feed (concentration checks only)")
     a = p.parse_args(argv)
-    ids = run_scan(a.user_id)
+    ids = run_scan(a.user_id, quote_fn=None if a.no_live else live_quote_change)
     for row in list_alerts(a.user_id, limit=20):
         flag = " " if row["read"] else "*"
         print(f"{flag} [{row['severity']:6s}] {row['title']}")
@@ -269,4 +327,5 @@ if __name__ == "__main__":
 __all__ = [
     "Alert", "raise_alert", "list_alerts", "unread_count", "mark_read", "clear",
     "concentration_alerts", "price_move_alerts", "scan_user", "scan_and_store", "run_scan",
+    "fetch_day_changes", "live_quote_change",
 ]

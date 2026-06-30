@@ -23,6 +23,9 @@ def _req():
 def alert_api(tmp_path, monkeypatch):
     monkeypatch.setenv("FINAI_ALERTS_DB", str(tmp_path / "a.db"))
     monkeypatch.setattr(app_module, "is_auth_enabled", lambda: False)
+    # Keep the scan endpoint offline+deterministic: the live day-move feed is
+    # exercised in test_alerts.py with a fake quote_fn.
+    monkeypatch.setattr(app_module.alerts, "live_quote_change", lambda *a, **k: None)
     uid = app_module._resolve_portfolio_user(None)   # the resolved demo user
     app_module._rate_limiter.reset(uid)
     yield uid

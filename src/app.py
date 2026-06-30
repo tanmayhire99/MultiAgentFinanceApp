@@ -397,10 +397,12 @@ async def get_alerts(request: Request, unread_only: bool = False, limit: int = 5
 
 @app.post("/alerts/scan")
 async def scan_alerts(request: Request):
-    """Scan the user's current holdings for new alerts (concentration, etc.).
+    """Scan the user's current holdings for new alerts.
 
-    Rate-limited like the analysis endpoints since it does work on behalf of the
-    user. Returns the number of newly-raised alerts plus the current unread count.
+    Runs the concentration rule plus the **live day-move feed** (fetches each
+    holding's 1-day change from the US live quote / NSE warehouse) so price-move
+    alerts fire for real. Rate-limited like the analysis endpoints since it does
+    work on behalf of the user. Returns new-alert + unread counts.
     """
     user_id = _require_user(request)
     rl = _rate_limiter.check(user_id)
@@ -409,7 +411,7 @@ async def scan_alerts(request: Request):
             status_code=429, detail=f"Rate limit exceeded for user '{user_id}'",
             headers={"Retry-After": str(rl.retry_after_seconds or 1)},
         )
-    new_ids = alerts.run_scan(user_id)
+    new_ids = alerts.run_scan(user_id, quote_fn=alerts.live_quote_change)
     return {
         "user_id": user_id,
         "new_alerts": len(new_ids),
