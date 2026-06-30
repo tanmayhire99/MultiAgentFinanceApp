@@ -119,9 +119,12 @@ take plain dicts and return `Alert`s, so they're trivially unit-tested.
   7-day window). `run_scan(user_id)` is the side-effectful adapter that pulls
   holdings from `src/mcp/portfolio_mcp.py`.
 - CLI for a scheduler/cron: `python -m src.core.alerts <user_id>`.
-- Next wiring (not yet done): an authed `/alerts` endpoint + unread badge in the
-  UI, and a `changes` (day-move) feed so `price_move` alerts fire live.
-- Tests: `tests/test_alerts.py`.
+- **HTTP API** (authed, same JWT gate as chat): `GET /alerts` (list +
+  `unread_count` for a UI badge), `POST /alerts/scan` (rate-limited),
+  `POST /alerts/mark-read` (`{alert_id}` or all). See `src/app.py`.
+- Next wiring (not yet done): a `changes` (day-move) feed so `price_move` alerts
+  fire live, and an unread badge in the LibreChat UI.
+- Tests: `tests/test_alerts.py` (unit) + `tests/test_alerts_api.py` (endpoints).
 
 ## Git identity (important)
 

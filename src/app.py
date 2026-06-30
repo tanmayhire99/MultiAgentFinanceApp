@@ -29,6 +29,7 @@ from .personas.base import (
 )
 from .mcp._fixtures import load_fixture
 from .config import mcp_servers
+from .core import alerts
 from .core.auth import authenticate_request, get_jwt_secret, is_auth_enabled
 from .core.dispatcher import run_analysis
 from .core.ratelimit import create_limiter_from_env
@@ -60,6 +61,18 @@ def _resolve_portfolio_user(requested: Optional[str]) -> str:
     if requested and requested in _KNOWN_PORTFOLIO_USERS:
         return requested
     return _DEFAULT_PORTFOLIO_USER
+
+
+def _require_user(request: Request, fallback: Optional[str] = None) -> str:
+    """Authenticate the request (when auth is enabled) and resolve a user id.
+
+    Mirrors the gate used by the chat endpoint so the alerts API enforces the
+    same JWT policy, then maps to a known portfolio user.
+    """
+    auth = authenticate_request(dict(request.headers), fallback_user=fallback)
+    if not auth.authenticated and is_auth_enabled():
+        raise HTTPException(status_code=401, detail=auth.error or "Unauthorized")
+    return _resolve_portfolio_user(auth.user_id if auth.authenticated else fallback)
 
 
 load_dotenv(".env")
@@ -357,6 +370,60 @@ async def query_entry(body: QueryRequest, request: Request):
         "query": body.query,
         "answer": transcript,
     }
+
+
+# ---------------------------------------------------------------------------
+# Event-driven portfolio alerts API (src.core.alerts)
+# ---------------------------------------------------------------------------
+class MarkReadRequest(BaseModel):
+    alert_id: Optional[int] = None  # None => mark all of the user's alerts read
+
+
+@app.get("/alerts")
+async def get_alerts(request: Request, unread_only: bool = False, limit: int = 50):
+    """List the authenticated user's portfolio alerts, newest first.
+
+    Returns ``unread_count`` alongside the list so a UI can render an unread
+    badge from a single call.
+    """
+    user_id = _require_user(request)
+    limit = max(1, min(int(limit or 50), 200))
+    return {
+        "user_id": user_id,
+        "unread_count": alerts.unread_count(user_id),
+        "alerts": alerts.list_alerts(user_id, unread_only=unread_only, limit=limit),
+    }
+
+
+@app.post("/alerts/scan")
+async def scan_alerts(request: Request):
+    """Scan the user's current holdings for new alerts (concentration, etc.).
+
+    Rate-limited like the analysis endpoints since it does work on behalf of the
+    user. Returns the number of newly-raised alerts plus the current unread count.
+    """
+    user_id = _require_user(request)
+    rl = _rate_limiter.check(user_id)
+    if not rl.allowed:
+        raise HTTPException(
+            status_code=429, detail=f"Rate limit exceeded for user '{user_id}'",
+            headers={"Retry-After": str(rl.retry_after_seconds or 1)},
+        )
+    new_ids = alerts.run_scan(user_id)
+    return {
+        "user_id": user_id,
+        "new_alerts": len(new_ids),
+        "unread_count": alerts.unread_count(user_id),
+        "alerts": alerts.list_alerts(user_id, limit=50),
+    }
+
+
+@app.post("/alerts/mark-read")
+async def mark_alerts_read(body: MarkReadRequest, request: Request):
+    """Mark one alert (by id) or all of the user's alerts as read."""
+    user_id = _require_user(request)
+    alerts.mark_read(user_id, body.alert_id)
+    return {"user_id": user_id, "unread_count": alerts.unread_count(user_id)}
 
 
 # ---------------------------------------------------------------------------
