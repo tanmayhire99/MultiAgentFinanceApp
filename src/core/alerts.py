@@ -306,12 +306,65 @@ def run_scan(user_id: str, changes: Optional[Dict[str, float]] = None, quote_fn=
 
 def _main(argv: Optional[List[str]] = None) -> int:
     import argparse
+    import signal
+    import sys
+    import time as _time
 
-    p = argparse.ArgumentParser(description="Scan a user's portfolio for alerts.")
-    p.add_argument("user_id")
+    p = argparse.ArgumentParser(
+        description="Scan a user's portfolio for alerts, or run a background daemon.")
+    p.add_argument("user_id", nargs="?", default=None,
+                   help="user_id to scan (one-shot mode; omit with --loop)")
+    p.add_argument("--loop", action="store_true",
+                   help="run a background daemon scanning every real user")
     p.add_argument("--no-live", action="store_true",
                    help="skip the live day-move feed (concentration checks only)")
-    a = p.parse_args(argv)
+    p.add_argument("--interval", type=int, default=900,
+                   help="seconds between scans (--loop only; default 900s / 15 min)")
+    p.add_argument("--stop-after", type=int, default=0,
+                   help="stop the loop after N iterations (--loop only; 0 = forever)")
+    a = p.parse_args(argv if argv is not None else None)
+
+    if a.loop:
+        # -----------------------------------------------------------------
+        # daemon mode
+        # -----------------------------------------------------------------
+        from src.core.memory import list_real_users
+
+        iterations = 0
+        forever = a.stop_after <= 0
+        log.info("alert loop starting — interval=%ds users=%s", a.interval,
+                 "polling memory" if forever else f"limited to {a.stop_after} iterations")
+
+        stop = False
+        def _handle_signal(_sig, _frame):
+            nonlocal stop
+            stop = True
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+
+        while not stop:
+            iterations += 1
+            if not forever and iterations > a.stop_after:
+                break
+            users = list_real_users()
+            if not users:
+                log.info("alert loop iteration %d: no real users with a profile yet",
+                         iterations)
+            for uid in users:
+                try:
+                    new_ids = run_scan(uid, quote_fn=None if a.no_live else live_quote_change)
+                    if new_ids:
+                        log.info("alert loop: user=%s new_alerts=%s", uid, len(new_ids))
+                except Exception:
+                    log.exception("alert loop: user=%s scan crashed (skipping)", uid)
+            _time.sleep(a.interval)
+        return 0
+
+    # ---------------------------------------------------------------------
+    # one-shot mode
+    # ---------------------------------------------------------------------
+    if not a.user_id:
+        p.error("user_id required for one-shot scan (or pass --loop)")
     ids = run_scan(a.user_id, quote_fn=None if a.no_live else live_quote_change)
     for row in list_alerts(a.user_id, limit=20):
         flag = " " if row["read"] else "*"

@@ -98,6 +98,8 @@ _SYSTEM = """You route queries for a multi-agent finance assistant. Pick ONE int
    Signals: "my portfolio", "my holdings", "my stocks", "my positions", "my investments", "what do I own".
 
 2) stock_research — user asks about specific stock(s), not necessarily held.
+   If the user asks for "panel", "debate", "experts' opinion" or mentions Buffett/Wood/Graham by name, ADD `want_panel: true` so the investor panel runs. Otherwise, ``want_panel: false``.
+   DO NOT call this "deep_stock_research" unless the user asks for deep / multi-round / promise-vs-reality / forward-claims analysis.
    Signals: company name / ticker, "research X", "tell me about X", "analyse X", "should I buy X".
 
 3) deep_stock_research — user wants a LONG, multi-step deep dive on ONE (or a few) tickers that goes BEYOND current metrics: historical claim tracking (did management deliver on past guidance?), SEC filings review (10-K / 10-Q / 8-K), multi-quarter news archaeology, promises-vs-reality analysis. This is a BATCH-mode flow (2-5 minutes); only pick it when the user is asking for that kind of depth.
@@ -626,10 +628,10 @@ def _safe_fallback(
                 "intent": "deep_stock_research",
                 "tickers": tickers_in_q[:3],
                 "topic": ", ".join(tickers_in_q[:3]),
-                "want_panel": False,
+                "want_panel": True,
                 "rationale": (
                     f"Fallback: deep-research keyword + ticker(s) {tickers_in_q[:3]} "
-                    f"({reason})."
+                    f"({reason}); investor panel enabled for depth."
                 ),
             }
         # No tickers found — send to stock_research which will ask the user

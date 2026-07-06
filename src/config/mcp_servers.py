@@ -156,12 +156,15 @@ def _partition_and_namespace(tools: List[BaseTool]) -> List[BaseTool]:
     known_counts = {
         "portfolio": 6,      # list_supported_users, holdings, summary, sectors, risks, score
         "us_stock": 6,       # list, quote, fundamentals, growth, defensive, moat_signals
-        "indian_stock": 9,   # us_stock 6 + warehouse: price_history, top_movers, sector_performance
+        # 6 base + 4 warehouse-backed (price_history, technicals, top_movers,
+        # sector_performance). Without WAREHOUSE_DATABASE_URL the warehouse
+        # tools no-op so the @mcp.tool decorators still register 10 names.
+        "indian_stock": 10,
         "research": 16,      # list, search_news, search_web, company_brief, catalysts,
                              # analyst_takes, search_historical_news, get_sec_filings,
                              # fetch_sec_document, extract_forward_claims, compare_claim_to_reality,
                              # get_indian_filings, fetch_indian_document, get_screener_snapshot,
-                             # get_indian_concall_urls, get_indian_annual_reports
+                             # get_indian_conc_urls, get_indian_annual_reports
     }
     # Opt-in cross-project quant server (last in MCP_SERVERS when enabled).
     if "quant" in MCP_SERVERS:

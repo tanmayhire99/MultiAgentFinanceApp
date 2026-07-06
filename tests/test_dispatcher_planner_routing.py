@@ -83,14 +83,14 @@ class DeriveIntentFlagsTests(unittest.TestCase):
         flags = _derive_intent_flags({})
         self.assertTrue(all(v is False for v in flags.values()))
 
-    def test_deep_stock_research_sets_4_flags(self):
+    def test_deep_stock_research_sets_5_flags(self):
         flags = _derive_intent_flags({"intent": "deep_stock_research"})
         self.assertTrue(flags["wants_claim_tracking"])
         self.assertTrue(flags["wants_filings"])
         self.assertTrue(flags["wants_historical_news"])
         self.assertTrue(flags["wants_deep_research"])
+        self.assertTrue(flags["wants_panel_debate"])
         self.assertFalse(flags["wants_portfolio_data"])
-        self.assertFalse(flags["wants_panel_debate"])
 
     def test_portfolio_analysis_sets_portfolio_and_panel(self):
         flags = _derive_intent_flags({"intent": "portfolio_analysis"})

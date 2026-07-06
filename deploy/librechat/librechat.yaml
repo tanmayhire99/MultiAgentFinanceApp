@@ -26,18 +26,18 @@ endpoints:
       - "context"
       - "web_search"
 
-custom:
-- name: "FinAI"
-  apiKey: "finai-production"
-  baseURL: "http://finai-api:8000/v1"
-  headers:
-    X-LibreChat-Token: "{{LIBRECHAT_JWT}}"
-  models:
-    default:
-    - "finai-advisor"
-  fetch: false
-  titleConvo: true
-  titleModel: "current_model"
-  modelDisplayLabel: "FinAI Advisor"
-  dropParams:
-  - "stop"
+  custom:
+    - name: "FinAI"
+      apiKey: "finai-production"
+      baseURL: "http://finai-api:8000/v1"
+      headers:
+        X-LibreChat-Token: "{{LIBRECHAT_JWT}}"
+      models:
+        default:
+          - "finai-advisor"
+      fetch: false
+      titleConvo: true
+      titleModel: "current_model"
+      modelDisplayLabel: "FinAI Advisor"
+      dropParams:
+        - "stop"

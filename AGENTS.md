@@ -127,8 +127,15 @@ take plain dicts and return `Alert`s, so they're trivially unit-tested.
   warehouse last-two-closes; else → US live quote `change_pct_1d`) — so
   `price_move` alerts fire for real. The `quote_fn` is a seam, so the scan stays
   offline/deterministic in tests; `--no-live` skips it on the CLI.
+- **Scheduled background scan** (`python -m src.core.alerts --loop`): a daemon
+  that iterates every real user (per `memory.list_real_users()`) and calls
+  `run_scan(user_id)` on a configurable interval (default 15 min). Stop it
+  with SIGINT/SIGTERM, or use `--stop-after N` for a fixed run. Reads the
+  live day-move feed by default; add `--no-live` for concentration-only runs.
+  This is the production path — a cron/process-manager wrapper keeps it alive.
 - Next wiring (not yet done): an unread badge in the LibreChat UI.
-- Tests: `tests/test_alerts.py` (unit incl. live feed) + `tests/test_alerts_api.py`.
+- Tests: `tests/test_alerts.py` (unit incl. live feed) + `tests/test_alerts_api.py`
+  + `tests/test_alerts_loop.py` (daemon/list_users).
 
 ## Git identity (important)
 

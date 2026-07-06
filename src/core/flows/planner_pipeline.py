@@ -71,10 +71,13 @@ def _derive_intent_flags(decision: Optional[Dict[str, Any]]) -> Dict[str, bool]:
         flags["wants_filings"] = True
         flags["wants_historical_news"] = True
         flags["wants_deep_research"] = True
+        flags["wants_panel_debate"] = True
     elif intent == "portfolio_analysis":
         flags["wants_portfolio_data"] = True
         flags["wants_panel_debate"] = True
-    # stock_research, topic_research, educational, meta_help, smalltalk:
+    elif intent == "stock_research" and want_panel:
+        flags["wants_panel_debate"] = True
+    # topic_research, educational, meta_help, smalltalk:
     # leave all flags False; the planner's catalog gives it research_agent
     # by default and the synthesizer is always allowed.
 

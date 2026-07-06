@@ -270,7 +270,23 @@ def forget(user_id: str) -> None:
         log.exception("memory.forget failed")
 
 
+def list_real_users() -> tuple[str, ...]:
+    """Return every user_id that has a profile row (excludes demo/anonymous/guest).
+
+    The scheduler reads this to know *who* to scan; memory.gate ensures only
+    real (authed) users ever get a row here. Safe for a hot-loop caller — the
+    profile table is small.
+    """
+    try:
+        with _connect() as con:
+            rows = con.execute("SELECT user_id FROM profile ORDER BY user_id").fetchall()
+        return tuple(r["user_id"] for r in rows if is_real_user(r["user_id"]))
+    except Exception:
+        log.exception("memory.list_real_users failed")
+        return ()
+
+
 __all__ = [
     "recall", "observe", "remember", "get_profile", "set_profile",
-    "forget", "is_real_user",
+    "forget", "is_real_user", "list_real_users",
 ]

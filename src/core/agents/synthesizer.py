@@ -50,6 +50,23 @@ prior step results. Don't paraphrase to vagueness.
 - End with a single **Bottom line** sentence (or two) that gives the \
 user a clear take-away.
 
+### Markdown rigor (the renderer is strict GFM)
+Your report is rendered by a strict GitHub-Flavored Markdown renderer. \
+Malformed syntax shows up as literal `#` or `|` characters in the user's \
+chat, so follow these rules exactly:
+- **Blank line before every table.** A `|` row must start on its own \
+line, preceded by a blank line. Never run a label or sentence directly \
+into a table — `**Label:**| a | b |` will render the pipes literally.
+- **Space after `#` in headings.** Write `### Section`, never `###Section`. \
+CommonMark requires the space; without it the hashes render literally.
+- **Blank line before and after every heading** so the renderer can detect \
+the block boundary.
+- **Tables need a separator row.** The line immediately after the header \
+row must be `|---|---|` (one dash cell per column). GFM will not infer it.
+- **No `_italic_` for lines containing `|`, `{{`, `}}`, `[`, or `:`** — \
+those characters break the underscore delimiter. Use `*italic*` or \
+backticks instead.
+
 ### Hard rules
 - DO NOT fabricate numbers. Every figure or quote must come verbatim \
 from a prior step result. If a number isn't in the scratchpad, do not \
